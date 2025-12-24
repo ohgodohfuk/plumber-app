@@ -20,6 +20,8 @@ import {
   Edit3,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Printer,
   Radio,
   ArrowRight
@@ -63,7 +65,6 @@ const INITIAL_FEED: LogEntry[] = [
     content: "Parts Run: Home Depot. 15m traffic delay on the bridge. Will be late to next site.",
     status: "reviewed"
   },
-  // I put this back so you have an invoice to review immediately
   {
     id: "LOG-9918",
     tech: "Auto-System",
@@ -83,6 +84,22 @@ const INITIAL_FEED: LogEntry[] = [
       notes: "Replaced corroded fitting under kitchen sink. Tested for leaks. System holding pressure.",
       sms: "Hi Jane, your invoice for today's plumbing service is ready. Total: $371.18. You can pay securely here: [LINK]"
     }
+  },
+  {
+    id: "LOG-9917",
+    tech: "System",
+    time: "2 hours ago",
+    type: "alert",
+    content: "Morning briefing complete. All units deployed. Weather alert: High winds warning.",
+    status: "system"
+  },
+  {
+    id: "LOG-9916",
+    tech: "Ripley, E.",
+    time: "3 hours ago",
+    type: "status",
+    content: "Checked into HQ for inventory resupply. Loaded Unit 303 with 50ft PEX.",
+    status: "logged"
   }
 ]
 
@@ -253,15 +270,10 @@ function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onCl
 
     // ACTION: APPROVE AND TEXT
     const handleSMS = () => {
-        // 1. Notify the parent component to update the log
         onSend();
-
-        // 2. Open the SMS app
         const phone = "555-0123" 
         const text = encodeURIComponent(data.sms)
         window.location.href = `sms:${phone}?&body=${text}`
-        
-        // 3. Close the modal
         onClose();
     }
 
@@ -472,8 +484,14 @@ function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onCl
 // --- MAIN DASHBOARD COMPONENT ---
 export default function CommandDashboard() {
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null)
-  const [showDispatch, setShowDispatch] = useState(false) // State for Dispatch Modal
+  const [showDispatch, setShowDispatch] = useState(false)
   const [feed, setFeed] = useState<LogEntry[]>(INITIAL_FEED)
+  
+  // --- PAGINATION STATE ---
+  const [currentPage, setCurrentPage] = useState(1)
+  const LOGS_PER_PAGE = 5
+  const totalPages = Math.ceil(feed.length / LOGS_PER_PAGE)
+  const paginatedFeed = feed.slice((currentPage - 1) * LOGS_PER_PAGE, currentPage * LOGS_PER_PAGE)
 
   // --- HANDLER: CREATE NEW DISPATCH ---
   const handleCreateDispatch = (details: any) => {
@@ -486,6 +504,7 @@ export default function CommandDashboard() {
           status: 'sent'
       }
       setFeed(prev => [newLog, ...prev])
+      setCurrentPage(1) // Return to first page on new entry
   }
 
   // --- HANDLER: INVOICE SENT ---
@@ -499,20 +518,29 @@ export default function CommandDashboard() {
           status: 'success'
       }
       setFeed(prev => [newLog, ...prev])
+      setCurrentPage(1)
   }
 
-  // --- SYNC LOGIC: LISTEN FOR UPDATES ---
+  // --- SYNC LOGIC ---
   useEffect(() => {
-    const checkForUpdates = () => {
+    const syncLogs = () => {
         const storedLogs = localStorage.getItem("plumber_ops_logs")
         if (storedLogs) {
             const parsedLogs = JSON.parse(storedLogs) as LogEntry[]
             setFeed(prev => {
-                if (prev.length >= parsedLogs.length + INITIAL_FEED.length) return prev; 
-                return [...parsedLogs, ...INITIAL_FEED].slice(0, 50)
+                // Ensure unique IDs if possible, or just overwrite for prototype
+                // We combine new live logs with the mock initial logs
+                // In a real app, this would be a DB query
+                const combined = [...parsedLogs, ...INITIAL_FEED]
+                // Deduplicate by ID
+                const unique = Array.from(new Map(combined.map(item => [item.id, item])).values())
+                return unique
             })
         }
     }
+    syncLogs()
+    window.addEventListener("storage", syncLogs)
+    return () => window.removeEventListener("storage", syncLogs)
   }, [])
 
   return (
@@ -569,10 +597,10 @@ export default function CommandDashboard() {
         </nav>
       </aside>
 
-      {/* MAIN CONTENT GRID */}
-      <main className="flex-1 flex flex-col relative">
+      {/* MAIN CONTENT GRID - LOCKED HEIGHT (No scrolling window) */}
+      <main className="flex-1 flex flex-col relative h-[calc(100vh)] max-h-screen">
         {/* Top Bar */}
-        <header className="h-16 border-b border-border bg-background/95 backdrop-blur flex items-center justify-between px-6 z-10">
+        <header className="h-16 border-b border-border bg-background/95 backdrop-blur flex items-center justify-between px-6 z-10 shrink-0">
             <div className="flex items-center gap-4">
                 <Search className="w-5 h-5 text-muted-foreground" />
                 <input 
@@ -595,12 +623,12 @@ export default function CommandDashboard() {
             </div>
         </header>
 
-        {/* Dashboard Grid */}
-        <div className="flex-1 p-6 grid grid-cols-12 gap-6 overflow-y-auto">
+        {/* Dashboard Grid - Fit to remaining height */}
+        <div className="flex-1 p-6 grid grid-cols-12 grid-rows-[auto_1fr] gap-6 overflow-hidden">
             
-            {/* KPI CARDS (Top Row) */}
-            <div className="col-span-12 grid grid-cols-4 gap-6 mb-2">
-                <div className="bg-card border border-border p-5 rounded-xl panel-bevel">
+            {/* KPI CARDS (Top Row - Fixed Height) */}
+            <div className="col-span-12 grid grid-cols-4 gap-6 h-32 shrink-0">
+                <div className="bg-card border border-border p-5 rounded-xl panel-bevel flex flex-col justify-center">
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Daily Revenue</span>
                         <DollarSign className="w-4 h-4 text-action-success" />
@@ -610,7 +638,7 @@ export default function CommandDashboard() {
                         <TrendingUp className="w-3 h-3" /> +12% vs avg
                     </div>
                 </div>
-                <div className="bg-card border border-border p-5 rounded-xl panel-bevel">
+                <div className="bg-card border border-border p-5 rounded-xl panel-bevel flex flex-col justify-center">
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Active Jobs</span>
                         <Clock className="w-4 h-4 text-action-warning" />
@@ -619,7 +647,7 @@ export default function CommandDashboard() {
                     <div className="text-xs font-medium text-muted-foreground mt-1">2 Pending Dispatch</div>
                 </div>
                 {/* PENDING QUOTES */}
-                <div className="bg-card border border-border p-5 rounded-xl panel-bevel">
+                <div className="bg-card border border-border p-5 rounded-xl panel-bevel flex flex-col justify-center">
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Pending Quotes</span>
                         <ClipboardList className="w-4 h-4 text-primary" />
@@ -629,7 +657,7 @@ export default function CommandDashboard() {
                 </div>
                 
                 {/* DISPATCH ACTION CARD */}
-                 <div className="bg-card border border-border p-5 rounded-xl panel-bevel relative overflow-hidden">
+                 <div className="bg-card border border-border p-5 rounded-xl panel-bevel relative overflow-hidden flex flex-col justify-center">
                     <div className="absolute inset-0 bg-primary/5" />
                     <div className="relative z-10 flex flex-col h-full justify-center items-center text-center">
                         <span className="text-xs font-black text-primary uppercase tracking-widest mb-1">New Assignment</span>
@@ -643,10 +671,9 @@ export default function CommandDashboard() {
                 </div>
             </div>
 
-            {/* LIVE MAP & UNITS (Main Area) */}
-            <div className="col-span-8 flex flex-col gap-6">
-                {/* Simulated Map */}
-                <div className="flex-1 bg-card border border-border rounded-xl panel-inset relative overflow-hidden min-h-[400px]">
+            {/* LIVE MAP & UNITS (Main Area - Fills remaining height) */}
+            <div className="col-span-8 flex flex-col h-full overflow-hidden">
+                <div className="flex-1 bg-card border border-border rounded-xl panel-inset relative overflow-hidden">
                      <div className="absolute inset-0 opacity-20"
                         style={{
                             backgroundImage: `linear-gradient(to right, var(--color-primary) 1px, transparent 1px), linear-gradient(to bottom, var(--color-primary) 1px, transparent 1px)`,
@@ -675,17 +702,19 @@ export default function CommandDashboard() {
                 </div>
             </div>
 
-            {/* INCOMING FEED (Right Panel) */}
-            <div className="col-span-4 bg-card border border-border rounded-xl panel-bevel flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-border bg-muted/20 flex justify-between items-center">
+            {/* INCOMING FEED (Right Panel - Fills remaining height) */}
+            <div className="col-span-4 bg-card border border-border rounded-xl panel-bevel flex flex-col h-full overflow-hidden">
+                <div className="p-4 border-b border-border bg-muted/20 flex justify-between items-center shrink-0">
                     <h2 className="text-xs font-black text-foreground uppercase tracking-widest flex items-center gap-2">
                         Activity Log
                     </h2>
                     <span className="text-[10px] font-bold text-muted-foreground">TODAY</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {feed.map((log) => (
-                        <div key={log.id} className="group relative bg-background border border-border rounded-lg p-3 transition-all hover:border-primary/50 animate-in slide-in-from-top-2 duration-300">
+                
+                {/* Feed List (Paginated) */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {paginatedFeed.map((log) => (
+                        <div key={log.id} className="group relative bg-background border border-border rounded-lg p-3 transition-all hover:border-primary/50 animate-in slide-in-from-right-2 duration-300">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
                                     log.type === 'invoice' ? 'bg-action-success/10 text-action-success' :
@@ -699,7 +728,6 @@ export default function CommandDashboard() {
                                 <span className="text-[10px] font-mono text-muted-foreground">{log.time}</span>
                             </div>
                             
-                            {/* USING EXPANDABLE TEXT COMPONENT TO FIX OVERFLOW */}
                             <div className="text-xs font-bold text-foreground leading-relaxed mb-2">
                                 <ExpandableText text={log.content} limit={70} />
                             </div>
@@ -718,6 +746,30 @@ export default function CommandDashboard() {
                         </div>
                     ))}
                 </div>
+
+                {/* PAGINATION CONTROLS (THE ARROW SELECTOR) */}
+                <div className="p-3 border-t border-border bg-muted/10 flex items-center justify-between shrink-0">
+                     <button 
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                        <ChevronLeft className="w-4 h-4" />
+                     </button>
+                     
+                     <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                        Page {currentPage} of {totalPages}
+                     </span>
+
+                     <button 
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                        <ChevronRight className="w-4 h-4" />
+                     </button>
+                </div>
+
             </div>
 
         </div>

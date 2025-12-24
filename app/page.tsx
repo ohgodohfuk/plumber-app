@@ -1,7 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useLiveQuery } from "dexie-react-hooks"
+import { db, seedDatabase, Job } from "@/lib/db"
 import { 
   Navigation, 
   MapPin, 
@@ -22,54 +24,8 @@ import {
 
 type WorkflowStep = "idle" | "traveling" | "arrived" | "debrief" | "complete"
 
-interface Job {
-  id: string
-  address: string
-  issue: string
-  notes: string
-  distance: string
-  estTime: string
-  priority: "high" | "normal" | "low"
-  status: "pending" | "complete"
-  timeWindow: string
-}
-
-// --- MOCK DATA INITIAL STATE ---
-const INITIAL_MANIFEST: Job[] = [
-  {
-    id: "JOB-4821",
-    address: "124 Maple Ave, Unit 3B",
-    issue: "Burst Pipe - Kitchen Sink",
-    notes: "Customer reports water leaking from cabinet. Main shutoff valve already closed. Bring extra compression fittings.",
-    distance: "3.2 mi",
-    estTime: "8 min",
-    priority: "high",
-    status: "pending",
-    timeWindow: "08:00 - 10:00"
-  },
-  {
-    id: "JOB-4822",
-    address: "880 Industrial Park Rd",
-    issue: "Backflow Preventer Test",
-    notes: "Annual commercial testing. Access code: 1234#",
-    distance: "8.4 mi",
-    estTime: "15 min",
-    priority: "normal",
-    status: "pending",
-    timeWindow: "10:30 - 12:00"
-  },
-  {
-    id: "JOB-4823",
-    address: "15 West Main St",
-    issue: "Water Heater Install",
-    notes: "Replace 40G electric. Unit is in the garage.",
-    distance: "12.1 mi",
-    estTime: "22 min",
-    priority: "normal",
-    status: "pending",
-    timeWindow: "13:00 - 16:00"
-  }
-]
+// Note: The 'Job' interface is now imported from @/lib/db to ensure consistency
+// We keep WorkflowStep here as it is UI state specific
 
 // --- COMPONENT: DEBRIEF MODAL (The Voice Recorder) ---
 // Now accepts 'notes' as an argument to submit
@@ -371,27 +327,50 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
 // --- MAIN PAGE: MANIFEST VIEW ---
 export default function FieldApp() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
-  const [manifest, setManifest] = useState<Job[]>(INITIAL_MANIFEST)
+  
+  // 1. THE BRAIN TRANSPLANT:
+  // Instead of static data, we listen to the database live.
+  const manifest = useLiveQuery(() => db.jobs.toArray())
 
-  // Derived state to find the active job object
-  const activeJob = manifest.find(j => j.id === activeJobId)
+  // 2. INITIALIZE DB:
+  // Run the seed function when the app loads
+  useEffect(() => {
+    seedDatabase()
+  }, [])
 
-  // Handle job completion
-  const handleJobComplete = (id: string) => {
-    // 1. Mark job as complete in state
-    setManifest(prev => prev.map(job => 
-        job.id === id ? { ...job, status: "complete" } : job
-    ))
-    // 2. Close the active view
+  // 3. HANDLE COMPLETION:
+  // Now we update the real database instead of React state
+  const handleJobComplete = async (id: string) => {
+    if (!manifest) return;
+    
+    // Update the job in the database
+    await db.jobs.update(id, { 
+        status: "complete",
+        lastUpdated: Date.now()
+    })
+    
+    // Close the view
     setActiveJobId(null)
   }
+
+  // Loading state while database connects
+  if (!manifest) return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono scanlines">
+          <div className="text-action-success animate-pulse text-xl font-black tracking-widest uppercase">
+              Initializing IronClad DB...
+          </div>
+      </div>
+  )
+
+  const activeJob = manifest.find(j => j.id === activeJobId)
 
   // If a job is selected, show the Active Job View
   if (activeJob) {
     return (
       <div className="dark min-h-screen bg-background scanlines font-mono text-foreground">
         <ActiveJobView 
-            job={activeJob} 
+            // We cast the type because our DB type is slightly stricter
+            job={activeJob as any} 
             onBack={() => setActiveJobId(null)} 
             onComplete={handleJobComplete}
         />
