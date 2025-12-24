@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import Link from "next/link"
 import { 
   LayoutDashboard, 
   Users, 
@@ -16,38 +17,39 @@ import {
   X,
   Send,
   MessageSquare,
-  Edit3
+  Edit3,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react"
 
-// --- MOCK DATA: BUSINESS LOGS ---
-const ACTIVITY_FEED = [
-  {
-    id: "LOG-9921",
-    tech: "J. Mason",
-    time: "2 mins ago",
-    type: "invoice",
-    content: "Job 4821 Complete. Replaced P-trap. Quote generated for water heater.",
-    status: "processing",
-    // This mock data simulates what the AI extracted from the voice note
-    invoiceData: {
-        customer: "Sarah Jenkins",
-        address: "124 Maple Ave, Unit 3B",
-        items: [
-            { desc: "Labor (Standard Rate)", qty: 1.5, price: 150.00 },
-            { desc: "PVC P-Trap Kit (1-1/2\")", qty: 1, price: 24.50 },
-            { desc: "Misc. Solvents/Consumables", qty: 1, price: 12.00 }
-        ],
-        total: 186.50,
-        notes: "Replaced leaking P-trap under kitchen sink. Checked mainly stack - all clear. Client requested quote for 40G electric water heater (sent separately).",
-        sms: "Hi Sarah, your plumbing service at 124 Maple Ave is complete. Total: $186.50. Check your email for the invoice. - Lethbridge Plumbing"
-    }
-  },
+// --- TYPES ---
+interface InvoiceData {
+  customer: string
+  address: string
+  items: { desc: string; qty: number; price: number }[]
+  total: number
+  notes: string
+  sms: string
+}
+
+interface LogEntry {
+  id: string
+  tech: string
+  time: string
+  type: string
+  content: string
+  status: string
+  invoiceData?: InvoiceData
+}
+
+// --- MOCK DATA ---
+const ACTIVITY_FEED: LogEntry[] = [
   {
     id: "LOG-9920",
     tech: "S. Connor",
     time: "15 mins ago",
     type: "status",
-    content: "Arrived at 880 Industrial Park. Started pressure test.",
+    content: "Arrived at 880 Industrial Park. Started pressure test. Access code was correct.",
     status: "logged"
   },
   {
@@ -55,7 +57,7 @@ const ACTIVITY_FEED = [
     tech: "J. Mason",
     time: "45 mins ago",
     type: "delay",
-    content: "Parts Run: Home Depot. 15m traffic delay.",
+    content: "Parts Run: Home Depot. 15m traffic delay on the bridge. Will be late to next site.",
     status: "reviewed"
   }
 ]
@@ -66,8 +68,40 @@ const TEAM_MEMBERS = [
   { id: "303", name: "Ripley, E.", status: "idle", location: "HQ - Resupply" }
 ]
 
+// --- COMPONENT: EXPANDABLE TEXT (REUSABLE) ---
+// Fixes overflow issues by forcing wrap and handling expansion verticaly
+function ExpandableText({ text, limit = 80, className = "" }: { text: string, limit?: number, className?: string }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const shouldTruncate = text.length > limit
+
+  if (!shouldTruncate) {
+    return <p className={`break-words whitespace-pre-wrap ${className}`}>{text}</p>
+  }
+
+  return (
+    <div className="relative">
+      <p className={`break-words whitespace-pre-wrap transition-all duration-200 ${className} ${isExpanded ? "" : "line-clamp-2"}`}>
+        {text}
+      </p>
+      <button 
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsExpanded(!isExpanded)
+        }}
+        className="text-[10px] font-black text-primary hover:underline mt-1.5 uppercase flex items-center gap-1 select-none"
+      >
+        {isExpanded ? (
+            <>Show Less <ChevronUp className="w-3 h-3" /></>
+        ) : (
+            <>Read More <ChevronDown className="w-3 h-3" /></>
+        )}
+      </button>
+    </div>
+  )
+}
+
 // --- COMPONENT: INVOICE REVIEW MODAL ---
-function InvoiceReviewModal({ data, onClose }: { data: any, onClose: () => void }) {
+function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () => void }) {
     return (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col max-h-[90vh]">
@@ -109,7 +143,7 @@ function InvoiceReviewModal({ data, onClose }: { data: any, onClose: () => void 
                                 </tr>
                             </thead>
                             <tbody className="font-mono">
-                                {data.items.map((item: any, i: number) => (
+                                {data.items.map((item, i) => (
                                     <tr key={i} className="border-b border-border/50">
                                         <td className="py-3 text-foreground">{item.desc}</td>
                                         <td className="py-3 text-right text-muted-foreground">{item.qty}</td>
@@ -126,12 +160,13 @@ function InvoiceReviewModal({ data, onClose }: { data: any, onClose: () => void 
                         </table>
                     </div>
 
-                    {/* Job Notes */}
+                    {/* Job Notes - NOW USING EXPANDABLE TEXT */}
                     <div className="bg-muted/20 rounded-lg p-4 border border-border/50">
                          <h3 className="text-xs font-black text-muted-foreground uppercase tracking-widest mb-2">Technician Notes (Public)</h3>
-                         <p className="text-sm text-foreground leading-relaxed">
-                            {data.notes}
-                         </p>
+                         <div className="text-sm text-foreground">
+                            {/* Limits to 200 chars before truncating */}
+                            <ExpandableText text={data.notes} limit={200} />
+                         </div>
                     </div>
 
                     {/* Auto-Text Preview */}
@@ -168,7 +203,23 @@ function InvoiceReviewModal({ data, onClose }: { data: any, onClose: () => void 
 
 // --- MAIN DASHBOARD COMPONENT ---
 export default function CommandDashboard() {
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null)
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null)
+  const [feed, setFeed] = useState<LogEntry[]>(ACTIVITY_FEED)
+
+  // --- SYNC LOGIC: LISTEN FOR UPDATES ---
+  useEffect(() => {
+    const checkForUpdates = () => {
+        const storedLogs = localStorage.getItem("plumber_ops_logs")
+        if (storedLogs) {
+            const parsedLogs = JSON.parse(storedLogs) as LogEntry[]
+            setFeed([...parsedLogs, ...ACTIVITY_FEED].slice(0, 50))
+        }
+    }
+
+    checkForUpdates()
+    const interval = setInterval(checkForUpdates, 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="dark min-h-screen bg-background flex scanlines font-mono text-foreground overflow-hidden">
@@ -188,7 +239,11 @@ export default function CommandDashboard() {
             <div className="w-2 h-2 bg-action-success rounded-full" />
             <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">System Active</span>
           </div>
-          <h1 className="text-2xl font-black uppercase tracking-tight">OPERATIONS</h1>
+          <Link href="/" title="Return to Field View">
+            <h1 className="text-2xl font-black uppercase tracking-tight hover:text-primary transition-colors cursor-pointer">
+                OPERATIONS
+            </h1>
+          </Link>
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
@@ -321,8 +376,8 @@ export default function CommandDashboard() {
                     <span className="text-[10px] font-bold text-muted-foreground">TODAY</span>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {ACTIVITY_FEED.map((log) => (
-                        <div key={log.id} className="group relative bg-background border border-border rounded-lg p-3 transition-all hover:border-primary/50">
+                    {feed.map((log) => (
+                        <div key={log.id} className="group relative bg-background border border-border rounded-lg p-3 transition-all hover:border-primary/50 animate-in slide-in-from-top-2 duration-300">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
                                     log.type === 'invoice' ? 'bg-action-success/10 text-action-success' :
@@ -334,15 +389,16 @@ export default function CommandDashboard() {
                                 <span className="text-[10px] font-mono text-muted-foreground">{log.time}</span>
                             </div>
                             
-                            <p className="text-xs font-bold text-foreground leading-relaxed mb-2">
-                                {log.content}
-                            </p>
+                            {/* USING EXPANDABLE TEXT COMPONENT TO FIX OVERFLOW */}
+                            <div className="text-xs font-bold text-foreground leading-relaxed mb-2">
+                                <ExpandableText text={log.content} limit={70} />
+                            </div>
 
                             <div className="flex items-center justify-between border-t border-border/50 pt-2">
                                 <span className="text-[10px] font-bold text-muted-foreground uppercase">{log.tech}</span>
-                                {log.type === 'invoice' && (
+                                {log.type === 'invoice' && log.invoiceData && (
                                     <button 
-                                        onClick={() => setSelectedInvoice(log.invoiceData)}
+                                        onClick={() => setSelectedInvoice(log.invoiceData || null)}
                                         className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1"
                                     >
                                         Review Draft <CheckCircle2 className="w-3 h-3" />

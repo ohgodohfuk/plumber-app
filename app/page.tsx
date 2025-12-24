@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link" // Added for the Secret Passage
+import Link from "next/link"
 import { 
   Navigation, 
   MapPin, 
@@ -72,8 +72,10 @@ const INITIAL_MANIFEST: Job[] = [
 ]
 
 // --- COMPONENT: DEBRIEF MODAL (The Voice Recorder) ---
-function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: () => void }) {
+// Now accepts 'notes' as an argument to submit
+function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: (notes: string) => void }) {
     const [isRecording, setIsRecording] = useState(false)
+    const [notes, setNotes] = useState("")
     
     return (
         <div className="fixed inset-0 bg-background/95 backdrop-blur-md z-50 flex flex-col p-6 animate-in fade-in duration-200">
@@ -122,11 +124,13 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
             {/* Manual Notes Fallback */}
             <div className="mt-auto space-y-4">
                  <textarea 
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
                     placeholder="Or type manual notes here..."
                     className="w-full bg-card border border-border rounded-xl p-4 min-h-[100px] text-sm font-mono focus:border-primary transition-colors panel-inset"
                  />
                  <button 
-                    onClick={onSubmit}
+                    onClick={() => onSubmit(notes)}
                     className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98]"
                  >
                     <Save className="w-5 h-5" />
@@ -156,6 +160,42 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
     setShowResetConfirm(false)
   }
 
+  // --- THE SYNC LOGIC ---
+  // This sends the data to the "Cloud" (Browser LocalStorage)
+  const handleDebriefSubmit = (notes: string) => {
+    
+    // 1. Create the Log Entry
+    const newLog = {
+        id: `LOG-${Date.now()}`,
+        tech: "Unit 247 (You)",
+        time: "Just now",
+        type: "invoice",
+        content: `Job ${job.id} Complete. ${notes || "No notes provided."}`,
+        status: "processing",
+        invoiceData: {
+            customer: "Lethbridge Resident",
+            address: job.address,
+            items: [
+                { desc: "Service Call (Standard)", qty: 1, price: 150.00 },
+                { desc: "Labor / Parts", qty: 1, price: 85.00 }
+            ],
+            total: 235.00,
+            notes: notes,
+            sms: `Your service at ${job.address} is complete. Total: $235.00. Invoice sent.`
+        }
+    }
+
+    // 2. Save to Browser Storage
+    // This allows the Dashboard to see it immediately if opened in another window
+    const existingLogs = JSON.parse(localStorage.getItem("plumber_ops_logs") || "[]")
+    const updatedLogs = [newLog, ...existingLogs]
+    localStorage.setItem("plumber_ops_logs", JSON.stringify(updatedLogs))
+
+    // 3. Close Workflow
+    setShowDebrief(false)
+    onComplete(job.id)
+  }
+
   const isJobInProgress = currentStep !== "idle" && currentStep !== "complete"
 
   return (
@@ -165,10 +205,7 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
       {showDebrief && (
         <DebriefModal 
             onCancel={() => setShowDebrief(false)}
-            onSubmit={() => {
-                setShowDebrief(false)
-                onComplete(job.id)
-            }} 
+            onSubmit={handleDebriefSubmit}
         />
       )}
 
