@@ -1,26 +1,208 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+  --action-warning: oklch(0.82 0.16 85);
+  --action-warning-foreground: oklch(0.2 0.08 85);
+  --action-info: oklch(0.6 0.15 240);
+  --action-info-foreground: oklch(0.98 0 0);
+  --action-success: oklch(0.65 0.18 145);
+  --action-success-foreground: oklch(0.98 0 0);
+}
+
+.dark {
+  /* Updated to deep asphalt black background */
+  --background: oklch(0.12 0.005 250);
+  --foreground: oklch(0.94 0 0);
+  --card: oklch(0.16 0.008 250);
+  --card-foreground: oklch(0.9 0 0);
+  --popover: oklch(0.16 0.008 250);
+  --popover-foreground: oklch(0.9 0 0);
+  --primary: oklch(0.6 0.15 240);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.22 0.01 250);
+  --secondary-foreground: oklch(0.9 0 0);
+  --muted: oklch(0.2 0.01 250);
+  --muted-foreground: oklch(0.48 0.008 250);
+  --accent: oklch(0.28 0.015 250);
+  --accent-foreground: oklch(0.9 0 0);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.24 0.01 250);
+  --input: oklch(0.28 0.015 250);
+  --ring: oklch(0.6 0.15 240);
+  --chart-1: oklch(0.6 0.15 240);
+  --chart-2: oklch(0.65 0.18 145);
+  --chart-3: oklch(0.82 0.16 85);
+  --chart-4: oklch(0.55 0.2 305);
+  --chart-5: oklch(0.6 0.2 20);
+  --sidebar: oklch(0.16 0.008 250);
+  --sidebar-foreground: oklch(0.9 0 0);
+  --sidebar-primary: oklch(0.6 0.15 240);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.22 0.01 250);
+  --sidebar-accent-foreground: oklch(0.9 0 0);
+  --sidebar-border: oklch(0.28 0.015 250);
+  --sidebar-ring: oklch(0.5 0.015 250);
+
+  /* Simplified action colors - yellow, blue, green */
+  --action-warning: oklch(0.78 0.15 90);
+  --action-warning-foreground: oklch(0.15 0.02 90);
+  --action-info: oklch(0.58 0.18 245);
+  --action-info-foreground: oklch(0.98 0 0);
+  --action-success: oklch(0.62 0.17 150);
+  --action-success-foreground: oklch(0.98 0 0);
 }
 
 @theme inline {
+  --font-sans: "Geist", "Geist Fallback";
+  --font-mono: "Geist Mono", "Geist Mono Fallback";
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-action-warning: var(--action-warning);
+  --color-action-warning-foreground: var(--action-warning-foreground);
+  --color-action-info: var(--action-info);
+  --color-action-info-foreground: var(--action-info-foreground);
+  --color-action-success: var(--action-success);
+  --color-action-success-foreground: var(--action-success-foreground);
+
+  /* Add industrial action color tokens */
+  --color-action-volt: var(--action-volt);
+  --color-action-volt-foreground: var(--action-volt-foreground);
+  --color-action-alert: var(--action-alert);
+  --color-action-alert-foreground: var(--action-alert-foreground);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Add industrial texture utilities */
+@layer utilities {
+  .font-black {
+    font-weight: 900;
+  }
+
+  /* Scanline effect for technical aesthetic */
+  .scanlines {
+    position: relative;
+  }
+
+  .scanlines::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.15),
+      rgba(0, 0, 0, 0.15) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Added beveled panel effect for industrial look */
+  .panel-bevel {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.7);
+  }
+
+  /* Inset panel effect */
+  .panel-inset {
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  /* Glowing effect for primary elements */
+  .glow-volt {
+    box-shadow: 0 0 20px rgba(204, 255, 0, 0.4), 0 0 40px rgba(204, 255, 0, 0.2), inset 0 0 20px rgba(204, 255, 0, 0.1);
+  }
+
+  .glow-alert {
+    box-shadow: 0 0 15px rgba(249, 115, 22, 0.5), 0 0 30px rgba(249, 115, 22, 0.3);
+  }
+
+  /* Caution stripes */
+  .caution-stripes {
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 10px,
+      rgba(204, 255, 0, 0.1) 10px,
+      rgba(204, 255, 0, 0.1) 20px
+    );
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
