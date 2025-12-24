@@ -19,7 +19,10 @@ import {
   MessageSquare,
   Edit3,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Printer,
+  Radio,
+  ArrowRight
 } from "lucide-react"
 
 // --- TYPES ---
@@ -43,7 +46,7 @@ interface LogEntry {
 }
 
 // --- MOCK DATA ---
-const ACTIVITY_FEED: LogEntry[] = [
+const INITIAL_FEED: LogEntry[] = [
   {
     id: "LOG-9920",
     tech: "S. Connor",
@@ -59,6 +62,27 @@ const ACTIVITY_FEED: LogEntry[] = [
     type: "delay",
     content: "Parts Run: Home Depot. 15m traffic delay on the bridge. Will be late to next site.",
     status: "reviewed"
+  },
+  // I put this back so you have an invoice to review immediately
+  {
+    id: "LOG-9918",
+    tech: "Auto-System",
+    time: "1 hour ago",
+    type: "invoice",
+    content: "Job complete at 124 Maple Ave. Invoice generated for review.",
+    status: "pending",
+    invoiceData: {
+      customer: "Jane Doe",
+      address: "124 Maple Ave\nLethbridge, AB T1K 3M4",
+      items: [
+        { desc: "Service Call - Standard Diagnostic", qty: 1, price: 120.00 },
+        { desc: "Pipe Fitting Replacement (Copper 1/2\")", qty: 2, price: 45.50 },
+        { desc: "Labor (Hours)", qty: 1.5, price: 95.00 }
+      ],
+      total: 353.50,
+      notes: "Replaced corroded fitting under kitchen sink. Tested for leaks. System holding pressure.",
+      sms: "Hi Jane, your invoice for today's plumbing service is ready. Total: $371.18. You can pay securely here: [LINK]"
+    }
   }
 ]
 
@@ -68,8 +92,7 @@ const TEAM_MEMBERS = [
   { id: "303", name: "Ripley, E.", status: "idle", location: "HQ - Resupply" }
 ]
 
-// --- COMPONENT: EXPANDABLE TEXT (REUSABLE) ---
-// Fixes overflow issues by forcing wrap and handling expansion verticaly
+// --- COMPONENT: EXPANDABLE TEXT ---
 function ExpandableText({ text, limit = 80, className = "" }: { text: string, limit?: number, className?: string }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const shouldTruncate = text.length > limit
@@ -100,11 +123,250 @@ function ExpandableText({ text, limit = 80, className = "" }: { text: string, li
   )
 }
 
-// --- COMPONENT: INVOICE REVIEW MODAL ---
-function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () => void }) {
+// --- COMPONENT: DISPATCH MODAL ---
+function DispatchModal({ onClose, onDispatch }: { onClose: () => void, onDispatch: (details: any) => void }) {
+    const [priority, setPriority] = useState('normal')
+    const [tech, setTech] = useState('')
+    const [address, setAddress] = useState('')
+    const [issue, setIssue] = useState('')
+
+    const handleSubmit = () => {
+        if(!tech || !address || !issue) return;
+        onDispatch({ priority, tech, address, issue })
+        onClose()
+    }
+
     return (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-200">
-            <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col max-h-[90vh]">
+             <div className="bg-card border border-border w-full max-w-lg rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col">
+                <div className="bg-muted/30 border-b border-border p-6 flex justify-between items-center">
+                    <div>
+                        <h2 className="text-xl font-black text-foreground uppercase tracking-tight flex items-center gap-2">
+                           <Radio className="w-5 h-5 text-action-warning animate-pulse" /> New Dispatch
+                        </h2>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-muted rounded-lg transition-colors">
+                        <X className="w-6 h-6 text-muted-foreground" />
+                    </button>
+                </div>
+                
+                <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-3 gap-3">
+                        {['low', 'normal', 'urgent'].map((p) => (
+                            <button 
+                                key={p}
+                                onClick={() => setPriority(p)}
+                                className={`h-10 rounded border text-xs font-black uppercase tracking-wider transition-all ${
+                                    priority === p 
+                                    ? p === 'urgent' ? 'bg-destructive text-destructive-foreground border-destructive' : 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background hover:bg-muted border-border text-muted-foreground'
+                                }`}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Target Address</label>
+                            <input 
+                                autoFocus
+                                type="text" 
+                                value={address}
+                                onChange={(e) => setAddress(e.target.value)}
+                                placeholder="e.g. 505 Main St, Unit B"
+                                className="w-full bg-muted/20 border border-border rounded p-3 text-sm font-mono text-foreground focus:outline-none focus:border-primary/50 placeholder:text-muted-foreground/30"
+                            />
+                        </div>
+                        
+                        <div className="space-y-1">
+                             <label className="text-[10px] font-bold text-muted-foreground uppercase">Technician Assignment</label>
+                             <div className="grid grid-cols-1 gap-2">
+                                {TEAM_MEMBERS.map(t => (
+                                    <button 
+                                        key={t.id}
+                                        onClick={() => setTech(t.name)}
+                                        className={`flex items-center justify-between p-3 rounded border text-left transition-all ${
+                                            tech === t.name 
+                                            ? 'bg-primary/10 border-primary text-foreground' 
+                                            : 'bg-muted/10 border-border hover:bg-muted/20 text-muted-foreground'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-2 h-2 rounded-full ${
+                                                t.status === 'idle' ? 'bg-action-success' : 'bg-action-warning'
+                                            }`} />
+                                            <span className="text-sm font-bold font-mono">{t.name}</span>
+                                        </div>
+                                        <span className="text-[10px] uppercase opacity-70">{t.status}</span>
+                                    </button>
+                                ))}
+                             </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Issue Description</label>
+                            <textarea 
+                                value={issue}
+                                onChange={(e) => setIssue(e.target.value)}
+                                placeholder="Describe the job..."
+                                className="w-full bg-muted/20 border border-border rounded p-3 text-sm font-mono text-foreground focus:outline-none focus:border-primary/50 h-24 resize-none placeholder:text-muted-foreground/30"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-6 border-t border-border bg-muted/10">
+                    <button 
+                        onClick={handleSubmit}
+                        disabled={!tech || !address || !issue}
+                        className="w-full h-12 bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-black text-sm uppercase tracking-wide hover:brightness-110 transition-all panel-bevel flex items-center justify-center gap-2"
+                    >
+                        Transmit Order <ArrowRight className="w-4 h-4" />
+                    </button>
+                </div>
+             </div>
+        </div>
+    )
+}
+
+// --- COMPONENT: INVOICE REVIEW MODAL ---
+function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onClose: () => void, onSend: () => void }) {
+    
+    // --- CALCULATIONS FOR PRINT INVOICE ---
+    const subtotal = data.items.reduce((acc, item) => acc + (item.qty * item.price), 0);
+    const taxRate = 0.05; // 5% GST for Alberta
+    const taxAmount = subtotal * taxRate;
+    const grandTotal = subtotal + taxAmount;
+    
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const dueDate = new Date(today);
+    dueDate.setDate(dueDate.getDate() + 14); // Net 14
+    const dueDateStr = dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // ACTION: PRINT TO PDF
+    const handlePrint = () => {
+        window.print()
+    }
+
+    // ACTION: APPROVE AND TEXT
+    const handleSMS = () => {
+        // 1. Notify the parent component to update the log
+        onSend();
+
+        // 2. Open the SMS app
+        const phone = "555-0123" 
+        const text = encodeURIComponent(data.sms)
+        window.location.href = `sms:${phone}?&body=${text}`
+        
+        // 3. Close the modal
+        onClose();
+    }
+
+    return (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-200">
+            {/* PRINT STYLES INJECTION */}
+            <style jsx global>{`
+                @media print {
+                    /* HIDE ALL SCREEN UI */
+                    body * { visibility: hidden; }
+                    #invoice-modal-content, .bg-background, header, aside { display: none !important; }
+
+                    /* SHOW ONLY THE PRINT INVOICE */
+                    #print-invoice-container, #print-invoice-container * { 
+                        visibility: visible; 
+                        display: block !important;
+                    }
+                    
+                    /* PAGE LAYOUT */
+                    #print-invoice-container {
+                        position: fixed;
+                        left: 0;
+                        top: 0;
+                        width: 100vw;
+                        height: 100vh;
+                        background: white;
+                        color: black;
+                        padding: 40px;
+                        margin: 0;
+                        z-index: 99999;
+                    }
+                    
+                    /* TABLE STYLING FOR PRINT */
+                    table { width: 100%; border-collapse: collapse; }
+                    th { border-bottom: 2px solid #000; text-align: left; padding: 8px 0; }
+                    td { border-bottom: 1px solid #eee; padding: 12px 0; }
+                    .text-right { text-align: right; }
+                    .font-bold { font-weight: 700; }
+                }
+            `}</style>
+
+            {/* HIDDEN PRINT TEMPLATE */}
+            <div id="print-invoice-container" className="hidden font-sans text-black">
+                <div className="flex justify-between items-start mb-12">
+                    <div className="w-1/2">
+                        <h1 className="text-3xl font-bold uppercase tracking-wide text-black mb-2">Pro Plumbing Ops</h1>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                            123 Industrial Way<br/>Lethbridge, AB T1K 3M4<br/>P: (403) 555-0199
+                        </p>
+                    </div>
+                    <div className="w-1/2 text-right">
+                        <h2 className="text-5xl font-light text-gray-300 mb-4">INVOICE</h2>
+                        <div className="flex flex-col gap-1 text-sm">
+                            <div className="flex justify-end gap-4"><span className="font-bold text-gray-500">Date:</span><span>{dateStr}</span></div>
+                            <div className="flex justify-end gap-4"><span className="font-bold text-gray-500">Due:</span><span>{dueDateStr}</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mb-12 border-t border-gray-200 pt-8 flex justify-between">
+                    <div>
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Bill To</h3>
+                        <p className="text-lg font-bold text-black">{data.customer}</p>
+                        <p className="text-gray-600 whitespace-pre-wrap">{data.address}</p>
+                    </div>
+                </div>
+
+                <div className="mb-8">
+                    <table className="w-full">
+                        <thead>
+                            <tr>
+                                <th className="text-xs font-black uppercase text-gray-500 pb-4">Description</th>
+                                <th className="text-xs font-black uppercase text-gray-500 text-right pb-4 w-24">Qty</th>
+                                <th className="text-xs font-black uppercase text-gray-500 text-right pb-4 w-32">Price</th>
+                                <th className="text-xs font-black uppercase text-gray-500 text-right pb-4 w-32">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.items.map((item, i) => (
+                                <tr key={i}>
+                                    <td className="text-sm font-medium text-gray-800">{item.desc}</td>
+                                    <td className="text-sm text-gray-600 text-right">{item.qty}</td>
+                                    <td className="text-sm text-gray-600 text-right">${item.price.toFixed(2)}</td>
+                                    <td className="text-sm font-bold text-black text-right">${(item.qty * item.price).toFixed(2)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="flex justify-end mb-16">
+                    <div className="w-1/2 max-w-xs">
+                        <div className="flex justify-between py-2 border-b border-gray-100"><span className="text-gray-600">Subtotal</span><span className="font-bold">${subtotal.toFixed(2)}</span></div>
+                        <div className="flex justify-between py-2 border-b border-gray-100"><span className="text-gray-600">GST (5%)</span><span className="font-bold">${taxAmount.toFixed(2)}</span></div>
+                        <div className="flex justify-between py-4 border-b-2 border-black mt-2"><span className="text-xl font-black">Total</span><span className="text-xl font-black">${grandTotal.toFixed(2)}</span></div>
+                    </div>
+                </div>
+                
+                <div className="text-center text-xs text-gray-400 mt-auto pt-8">
+                    <p>Thank you for your business.</p>
+                </div>
+            </div>
+
+            {/* SCREEN UI */}
+            <div id="invoice-modal-content" className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col max-h-[90vh]">
                 
                 {/* Header */}
                 <div className="bg-muted/30 border-b border-border p-6 flex justify-between items-start">
@@ -118,7 +380,7 @@ function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () 
                         <h2 className="text-2xl font-black text-foreground uppercase tracking-tight">Invoice Review</h2>
                         <p className="text-sm text-muted-foreground">Generated from Voice Log • {data.customer}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-muted rounded-lg transition-colors">
+                    <button id="modal-close-btn" onClick={onClose} className="p-2 hover:bg-muted rounded-lg transition-colors">
                         <X className="w-6 h-6 text-muted-foreground" />
                     </button>
                 </div>
@@ -130,7 +392,7 @@ function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () 
                     <div className="space-y-4">
                         <div className="flex justify-between items-center border-b border-border pb-2">
                             <h3 className="text-xs font-black text-muted-foreground uppercase tracking-widest">Billable Items</h3>
-                            <button className="text-xs font-bold text-primary flex items-center gap-1 hover:underline">
+                            <button id="modal-edit-btn" className="text-xs font-bold text-primary flex items-center gap-1 hover:underline">
                                 <Edit3 className="w-3 h-3" /> Edit
                             </button>
                         </div>
@@ -153,18 +415,17 @@ function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () 
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={2} className="pt-4 text-right text-xs font-bold text-muted-foreground uppercase">Total Due</td>
-                                    <td className="pt-4 text-right text-xl font-black text-action-success">${data.total.toFixed(2)}</td>
+                                    <td colSpan={2} className="pt-4 text-right text-xs font-bold text-muted-foreground uppercase">Subtotal</td>
+                                    <td className="pt-4 text-right text-xl font-black text-action-success">${subtotal.toFixed(2)}</td>
                                 </tr>
                             </tfoot>
                         </table>
                     </div>
 
-                    {/* Job Notes - NOW USING EXPANDABLE TEXT */}
+                    {/* Job Notes */}
                     <div className="bg-muted/20 rounded-lg p-4 border border-border/50">
                          <h3 className="text-xs font-black text-muted-foreground uppercase tracking-widest mb-2">Technician Notes (Public)</h3>
                          <div className="text-sm text-foreground">
-                            {/* Limits to 200 chars before truncating */}
                             <ExpandableText text={data.notes} limit={200} />
                          </div>
                     </div>
@@ -186,13 +447,20 @@ function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () 
                 </div>
 
                 {/* Footer Actions */}
-                <div className="p-6 border-t border-border bg-muted/10 flex gap-4">
-                    <button className="flex-1 h-12 bg-card border border-border text-foreground rounded-lg font-bold text-sm uppercase tracking-wide hover:bg-muted transition-colors panel-bevel">
-                        Save as Draft
+                <div id="modal-footer-actions" className="p-6 border-t border-border bg-muted/10 flex gap-4">
+                    <button 
+                        onClick={handlePrint}
+                        className="flex-1 h-12 bg-card border border-border text-foreground rounded-lg font-bold text-sm uppercase tracking-wide hover:bg-muted transition-colors panel-bevel flex items-center justify-center gap-2"
+                    >
+                        <Printer className="w-4 h-4" />
+                        Print Invoice
                     </button>
-                    <button onClick={onClose} className="flex-[2] h-12 bg-action-success text-action-success-foreground rounded-lg font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 hover:brightness-110 transition-all panel-bevel active:scale-[0.98]">
+                    <button 
+                        onClick={handleSMS} 
+                        className="flex-[2] h-12 bg-action-success text-action-success-foreground rounded-lg font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 hover:brightness-110 transition-all panel-bevel active:scale-[0.98]"
+                    >
                         <Send className="w-4 h-4" />
-                        Approve & Send All
+                        Approve & Text Client
                     </button>
                 </div>
 
@@ -204,7 +472,34 @@ function InvoiceReviewModal({ data, onClose }: { data: InvoiceData, onClose: () 
 // --- MAIN DASHBOARD COMPONENT ---
 export default function CommandDashboard() {
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null)
-  const [feed, setFeed] = useState<LogEntry[]>(ACTIVITY_FEED)
+  const [showDispatch, setShowDispatch] = useState(false) // State for Dispatch Modal
+  const [feed, setFeed] = useState<LogEntry[]>(INITIAL_FEED)
+
+  // --- HANDLER: CREATE NEW DISPATCH ---
+  const handleCreateDispatch = (details: any) => {
+      const newLog: LogEntry = {
+          id: `LOG-${Math.floor(Math.random() * 10000)}`,
+          tech: "System",
+          time: "Just now",
+          type: details.priority === 'urgent' ? 'alert' : 'dispatch',
+          content: `Dispatch Sent: ${details.tech} assigned to ${details.address}. Priority: ${details.priority.toUpperCase()}. Issue: ${details.issue}`,
+          status: 'sent'
+      }
+      setFeed(prev => [newLog, ...prev])
+  }
+
+  // --- HANDLER: INVOICE SENT ---
+  const handleInvoiceSent = () => {
+      const newLog: LogEntry = {
+          id: `LOG-${Math.floor(Math.random() * 10000)}`,
+          tech: "Accounts",
+          time: "Just now",
+          type: 'status',
+          content: `Invoice sent to Jane Doe (124 Maple Ave) via SMS. Awaiting payment.`,
+          status: 'success'
+      }
+      setFeed(prev => [newLog, ...prev])
+  }
 
   // --- SYNC LOGIC: LISTEN FOR UPDATES ---
   useEffect(() => {
@@ -212,24 +507,32 @@ export default function CommandDashboard() {
         const storedLogs = localStorage.getItem("plumber_ops_logs")
         if (storedLogs) {
             const parsedLogs = JSON.parse(storedLogs) as LogEntry[]
-            setFeed([...parsedLogs, ...ACTIVITY_FEED].slice(0, 50))
+            setFeed(prev => {
+                if (prev.length >= parsedLogs.length + INITIAL_FEED.length) return prev; 
+                return [...parsedLogs, ...INITIAL_FEED].slice(0, 50)
+            })
         }
     }
-
-    checkForUpdates()
-    const interval = setInterval(checkForUpdates, 1000)
-    return () => clearInterval(interval)
   }, [])
 
   return (
     <div className="dark min-h-screen bg-background flex scanlines font-mono text-foreground overflow-hidden">
       
-      {/* RENDER MODAL IF INVOICE SELECTED */}
+      {/* RENDER INVOICE MODAL */}
       {selectedInvoice && (
         <InvoiceReviewModal 
             data={selectedInvoice} 
             onClose={() => setSelectedInvoice(null)} 
+            onSend={handleInvoiceSent}
         />
+      )}
+
+      {/* RENDER DISPATCH MODAL */}
+      {showDispatch && (
+          <DispatchModal 
+            onClose={() => setShowDispatch(false)}
+            onDispatch={handleCreateDispatch}
+          />
       )}
 
       {/* SIDEBAR NAVIGATION */}
@@ -315,7 +618,7 @@ export default function CommandDashboard() {
                     <div className="text-3xl font-black text-foreground">8</div>
                     <div className="text-xs font-medium text-muted-foreground mt-1">2 Pending Dispatch</div>
                 </div>
-                {/* REPLACED "FLEET STATUS" WITH "PENDING QUOTES" */}
+                {/* PENDING QUOTES */}
                 <div className="bg-card border border-border p-5 rounded-xl panel-bevel">
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Pending Quotes</span>
@@ -324,11 +627,16 @@ export default function CommandDashboard() {
                     <div className="text-3xl font-black text-foreground">5</div>
                     <div className="text-xs font-medium text-primary mt-1">Needs Review</div>
                 </div>
+                
+                {/* DISPATCH ACTION CARD */}
                  <div className="bg-card border border-border p-5 rounded-xl panel-bevel relative overflow-hidden">
                     <div className="absolute inset-0 bg-primary/5" />
                     <div className="relative z-10 flex flex-col h-full justify-center items-center text-center">
                         <span className="text-xs font-black text-primary uppercase tracking-widest mb-1">New Assignment</span>
-                        <button className="w-full py-2 bg-primary text-primary-foreground font-bold uppercase text-sm rounded hover:bg-primary/90 transition-colors panel-bevel">
+                        <button 
+                            onClick={() => setShowDispatch(true)}
+                            className="w-full py-2 bg-primary text-primary-foreground font-bold uppercase text-sm rounded hover:bg-primary/90 transition-colors panel-bevel"
+                        >
                             + Dispatch Job
                         </button>
                     </div>
@@ -381,7 +689,9 @@ export default function CommandDashboard() {
                             <div className="flex items-center gap-2 mb-2">
                                 <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
                                     log.type === 'invoice' ? 'bg-action-success/10 text-action-success' :
+                                    log.type === 'alert' ? 'bg-destructive/10 text-destructive animate-pulse' :
                                     log.type === 'delay' ? 'bg-destructive/10 text-destructive' :
+                                    log.type === 'dispatch' ? 'bg-primary/10 text-primary' :
                                     'bg-muted/50 text-muted-foreground'
                                 }`}>
                                     {log.type}
