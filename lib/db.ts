@@ -1,26 +1,30 @@
 // lib/db.ts
 import Dexie, { Table } from 'dexie';
 
+// 1. Define what a "Job" looks like in the database
 export interface Job {
   id: string;
-  assignee: string; // <--- NEW FIELD
+  assignee: string; // Ensure this exists from previous step
   address: string;
   issue: string;
   notes: string;
   distance: string;
   estTime: string;
-  priority: 'high' | 'normal' | 'low';
-  status: 'pending' | 'traveling' | 'arrived' | 'complete';
+  // UPDATE: Added 'urgent' to the allowed types
+  priority: 'high' | 'normal' | 'low' | 'urgent'; 
+  status: 'pending' | 'complete';
   timeWindow: string;
   lastUpdated?: number; 
 }
 
+// 2. Create the Database Class
 export class IronCladDB extends Dexie {
   jobs!: Table<Job>;
 
   constructor() {
     super('IronCladDB');
-    this.version(2).stores({ // <--- BUMPED VERSION TO 2
+    // We bump the version to 2 to safely upgrade the schema
+    this.version(2).stores({
       jobs: 'id, assignee, status, priority' 
     });
   }
@@ -28,7 +32,7 @@ export class IronCladDB extends Dexie {
 
 export const db = new IronCladDB();
 
-// Seed with assigned jobs
+// 3. Seed Data
 export const seedDatabase = async () => {
     const count = await db.jobs.count();
     if (count === 0) {
@@ -38,7 +42,7 @@ export const seedDatabase = async () => {
                 assignee: "Mason, J.",
                 address: "124 Maple Ave, Unit 3B",
                 issue: "Burst Pipe - Kitchen Sink",
-                notes: "Water leaking from cabinet. Shutoff valve closed.",
+                notes: "Customer reports water leaking from cabinet. Main shutoff valve already closed.",
                 distance: "3.2 mi",
                 estTime: "8 min",
                 priority: "high",

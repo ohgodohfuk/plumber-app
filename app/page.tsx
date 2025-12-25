@@ -19,7 +19,9 @@ import {
   Square,
   Save,
   UserCircle2,
-  Power
+  Power,
+  Loader2,
+  WifiOff
 } from "lucide-react"
 
 // --- TYPES ---
@@ -66,12 +68,21 @@ function LoginScreen({ onLogin }: { onLogin: (name: string) => void }) {
     )
 }
 
-// --- COMPONENT: DEBRIEF MODAL (Voice) ---
+// --- COMPONENT: DEBRIEF MODAL (HYBRID ENGINE) ---
 function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: (notes: string) => void }) {
     const [isRecording, setIsRecording] = useState(false)
+    const [isProcessing, setIsProcessing] = useState(false)
+    const [useOfflineMode, setUseOfflineMode] = useState(false)
     const [notes, setNotes] = useState("")
-    const recognitionRef = useRef<any>(null)
     
+    // 1. High-End API Refs (Online)
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+    const chunksRef = useRef<Blob[]>([])
+
+    // 2. Browser Native Refs (Offline Fallback)
+    const recognitionRef = useRef<any>(null)
+
+    // INITIALIZE BROWSER ENGINE (Just in case we need it)
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -80,6 +91,7 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                 recognition.continuous = true
                 recognition.interimResults = true
                 recognition.lang = 'en-US'
+                
                 recognition.onresult = (event: any) => {
                     let transcript = ''
                     for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -87,25 +99,85 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                             transcript += event.results[i][0].transcript + ' '
                         }
                     }
-                    if (transcript) setNotes(prev => (prev + transcript).trim() + " ")
+                    if (transcript) {
+                        setNotes(prev => (prev + transcript).trim() + " ")
+                    }
                 }
                 recognitionRef.current = recognition
             }
         }
     }, [])
 
-    const startListening = () => {
-        if (!recognitionRef.current) {
-            alert("Voice input not supported in this browser.")
-            return
+    // --- START LOGIC ---
+    const startRecording = async () => {
+        const isOnline = navigator.onLine
+        setUseOfflineMode(!isOnline)
+
+        if (isOnline) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                mediaRecorderRef.current = new MediaRecorder(stream)
+                chunksRef.current = [] 
+
+                mediaRecorderRef.current.ondataavailable = (e) => {
+                    if (e.data.size > 0) chunksRef.current.push(e.data)
+                }
+
+                mediaRecorderRef.current.start()
+                setIsRecording(true)
+            } catch (err) {
+                console.error("Mic Error:", err)
+                alert("Microphone access denied.")
+            }
+        } else {
+            if (!recognitionRef.current) {
+                alert("Offline voice input not supported in this browser.")
+                return
+            }
+            try {
+                recognitionRef.current.start()
+                setIsRecording(true)
+            } catch (e) {
+                console.error("Native Mic Error", e)
+            }
         }
-        setIsRecording(true)
-        try { recognitionRef.current.start() } catch (e) { console.error(e) }
     }
 
-    const stopListening = () => {
+    // --- STOP LOGIC ---
+    const stopRecording = () => {
         setIsRecording(false)
-        if (recognitionRef.current) recognitionRef.current.stop()
+
+        if (useOfflineMode && recognitionRef.current) {
+            recognitionRef.current.stop()
+            return
+        }
+
+        if (!useOfflineMode && mediaRecorderRef.current) {
+            setIsProcessing(true)
+            mediaRecorderRef.current.onstop = async () => {
+                const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' })
+                const formData = new FormData()
+                formData.append("file", audioBlob, "audio.webm")
+
+                try {
+                    const response = await fetch("/api/transcribe", {
+                        method: "POST",
+                        body: formData,
+                    })
+                    const data = await response.json()
+                    
+                    if (!response.ok) throw new Error(data.error || "Server Error")
+                    if (data.text) setNotes((prev) => (prev + " " + data.text).trim())
+                } catch (error: any) {
+                    console.error("Transcription Failed:", error)
+                    alert("Transcription failed. Please type manually.")
+                } finally {
+                    setIsProcessing(false)
+                    mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop())
+                }
+            }
+            mediaRecorderRef.current.stop()
+        }
     }
     
     return (
@@ -114,33 +186,78 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                 <h2 className="text-xl font-black uppercase text-foreground tracking-widest">Mission Debrief</h2>
                 <button onClick={onCancel} className="p-2 text-muted-foreground hover:text-foreground"><X className="w-8 h-8" /></button>
             </div>
+            
             <div className="flex-1 flex flex-col items-center justify-center gap-8">
                 <div 
-                    className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-300 ${isRecording ? 'bg-destructive/20 border-4 border-destructive shadow-[0_0_50px_var(--color-destructive)] scale-110' : 'bg-secondary border-4 border-border'}`}
-                    onMouseDown={startListening} onMouseUp={stopListening} onMouseLeave={stopListening}
-                    onTouchStart={(e) => { e.preventDefault(); startListening() }} onTouchEnd={(e) => { e.preventDefault(); stopListening() }}
+                    className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer select-none ${
+                        isRecording 
+                        ? 'bg-destructive/20 border-4 border-destructive shadow-[0_0_50px_var(--color-destructive)] scale-110' 
+                        : isProcessing 
+                        ? 'bg-action-warning/20 border-4 border-action-warning animate-pulse'
+                        : 'bg-secondary border-4 border-border hover:border-primary'
+                    }`}
+                    onMouseDown={startRecording} 
+                    onMouseUp={stopRecording} 
+                    onMouseLeave={stopRecording}
+                    onTouchStart={(e) => { e.preventDefault(); startRecording() }} 
+                    onTouchEnd={(e) => { e.preventDefault(); stopRecording() }}
                 >
                     <div className={`absolute inset-0 rounded-full border border-destructive opacity-0 ${isRecording ? 'animate-ping opacity-100' : ''}`} />
-                    {isRecording ? <Square className="w-16 h-16 text-destructive fill-current" /> : <Mic className="w-16 h-16 text-foreground" />}
+                    {isProcessing ? (
+                        <Loader2 className="w-16 h-16 text-action-warning animate-spin" />
+                    ) : isRecording ? (
+                        <Square className="w-16 h-16 text-destructive fill-current" /> 
+                    ) : useOfflineMode ? (
+                        <WifiOff className="w-16 h-16 text-muted-foreground" />
+                    ) : (
+                        <Mic className="w-16 h-16 text-foreground" />
+                    )}
                 </div>
+
                 <div className="text-center space-y-2">
-                    <h3 className={`text-2xl font-black uppercase tracking-widest ${isRecording ? 'text-destructive animate-pulse' : 'text-muted-foreground'}`}>{isRecording ? "LISTENING..." : "HOLD TO SPEAK"}</h3>
-                    <p className="text-xs font-mono text-muted-foreground max-w-[200px] mx-auto">AI will transcribe your voice logs directly.</p>
+                    <h3 className={`text-2xl font-black uppercase tracking-widest ${
+                        isRecording ? 'text-destructive animate-pulse' : 
+                        isProcessing ? 'text-action-warning' : 'text-muted-foreground'
+                    }`}>
+                        {isRecording ? "RECORDING..." : isProcessing ? "UPLOADING..." : "HOLD TO RECORD"}
+                    </h3>
+                    <p className="text-xs font-mono text-muted-foreground max-w-[200px] mx-auto">
+                        {useOfflineMode 
+                            ? "Offline Mode: Using simplified basic transcription." 
+                            : "Online Mode: AI Enhanced transcription active."}
+                    </p>
                 </div>
             </div>
+
             <div className="mt-auto space-y-4">
-                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Transcription appears here..." className="w-full bg-card border border-border rounded-xl p-4 min-h-[100px] text-sm font-mono focus:border-primary transition-colors panel-inset" />
-                 <button onClick={() => onSubmit(notes)} className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98]"><Save className="w-5 h-5" /> Submit & Close Job</button>
+                 <textarea 
+                    value={notes} 
+                    onChange={(e) => setNotes(e.target.value)} 
+                    placeholder="Dictate your job notes here, or type manually if you prefer..."
+                    className="w-full bg-card border border-border rounded-xl p-4 min-h-[100px] text-sm font-mono focus:border-primary transition-colors panel-inset placeholder:text-muted-foreground/50" 
+                    disabled={isProcessing}
+                 />
+                 <button 
+                    onClick={() => onSubmit(notes)} 
+                    disabled={isProcessing}
+                    className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                    <Save className="w-5 h-5" /> 
+                    Submit & Close Job
+                 </button>
             </div>
         </div>
     )
 }
 
 // --- COMPONENT: ACTIVE JOB VIEW ---
-function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => void; onComplete: (id: string) => void }) {
+// UPDATE: onComplete now takes (id, notes)
+function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => void; onComplete: (id: string, notes: string) => void }) {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("idle")
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showDebrief, setShowDebrief] = useState(false)
+
+  const isUrgent = job.priority === 'high' || job.priority === 'urgent';
 
   const handleAction = (step: WorkflowStep) => {
     if (step === "debrief") setShowDebrief(true)
@@ -153,33 +270,10 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
   }
 
   const handleDebriefSubmit = (notes: string) => {
-    const newLog = {
-        id: `LOG-${Date.now()}`,
-        tech: job.assignee, // Use real assignee from job
-        time: "Just now",
-        type: "invoice",
-        content: `Job ${job.id} Complete. ${notes || "No notes provided."}`,
-        status: "processing",
-        invoiceData: {
-            customer: "Lethbridge Resident",
-            address: job.address,
-            items: [{ desc: "Service Call", qty: 1, price: 150.00 }, { desc: "Labor", qty: 1, price: 85.00 }],
-            total: 235.00,
-            notes: notes,
-            sms: `Your service at ${job.address} is complete. Total: $235.00.`
-        }
-    }
-    
-    // Optimistic Update to LocalStorage for Dashboard Sync
-    if (typeof window !== 'undefined') {
-        const existingLogs = JSON.parse(localStorage.getItem("plumber_ops_logs") || "[]")
-        localStorage.setItem("plumber_ops_logs", JSON.stringify([newLog, ...existingLogs]))
-        // Trigger storage event manually if in same tab context (though usually dashboard is separate)
-        window.dispatchEvent(new Event("storage"))
-    }
-
+    // We do NOT save to localStorage here anymore for sync.
+    // We pass it to handleJobComplete to save to Dexie.
     setShowDebrief(false)
-    onComplete(job.id)
+    onComplete(job.id, notes)
   }
 
   const isJobInProgress = currentStep !== "idle" && currentStep !== "complete"
@@ -192,8 +286,8 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
             <button onClick={onBack} className="p-2 -ml-2 text-muted-foreground hover:text-foreground"><ArrowLeft className="w-6 h-6" /></button>
             <div>
                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 bg-action-success rounded-full animate-pulse" />
-                    <span className="text-xs font-bold text-action-success tracking-wider uppercase">Active Job</span>
+                    <span className={`w-2 h-2 rounded-full animate-pulse ${isUrgent ? 'bg-destructive' : 'bg-action-success'}`} />
+                    <span className={`text-xs font-bold tracking-wider uppercase ${isUrgent ? 'text-destructive' : 'text-action-success'}`}>Active Job</span>
                 </div>
                 <span className="text-sm font-bold text-foreground">{job.id}</span>
             </div>
@@ -238,9 +332,9 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
                <div className="pt-4 border-t border-border/50">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Critical Issue</span>
-                    {job.priority === 'high' && <span className="text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20">High Priority</span>}
+                    {isUrgent && <span className="text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20">URGENT PRIORITY</span>}
                   </div>
-                  <p className="text-lg font-bold text-destructive">{job.issue}</p>
+                  <p className={`text-lg font-bold ${isUrgent ? 'text-destructive' : 'text-foreground'}`}>{job.issue}</p>
                </div>
                <div className="bg-background/40 border border-border/50 rounded-lg p-3">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Dispatcher Notes</span>
@@ -272,10 +366,9 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
 
 // --- MAIN PAGE: MANIFEST VIEW ---
 export default function FieldApp() {
-  const [currentUser, setCurrentUser] = useState<string | null>(null) // <--- IDENTITY STATE
+  const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   
-  // FILTERED QUERY: Only show jobs assigned to the current user
   const manifest = useLiveQuery(
     () => currentUser ? db.jobs.where('assignee').equals(currentUser).toArray() : [],
     [currentUser]
@@ -283,32 +376,23 @@ export default function FieldApp() {
 
   useEffect(() => { seedDatabase() }, [])
 
-  const handleJobComplete = async (id: string) => {
-    // Note: manifest might be undefined initially, but Dexie hooks handle this gracefully.
-    // If we're completing a job, we know it exists.
-    await db.jobs.update(id, { status: "complete", lastUpdated: Date.now() })
+  // UPDATE: Now accepts notes and saves them to DB
+  const handleJobComplete = async (id: string, notes: string) => {
+    if (!manifest) return;
+    await db.jobs.update(id, { 
+        status: "complete", 
+        notes: notes, // <--- SAVING NOTES TO DEXIE FOR SYNC
+        lastUpdated: Date.now() 
+    })
     setActiveJobId(null)
   }
 
-  // --- SHOW LOGIN SCREEN IF NO USER ---
-  if (!currentUser) {
-      return <LoginScreen onLogin={setCurrentUser} />
-  }
+  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />
 
-  // Dexie returns undefined while loading
-  if (!manifest) {
-      return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono scanlines">
-            <div className="text-action-success animate-pulse text-xl font-black tracking-widest uppercase">
-                Initializing IronClad DB...
-            </div>
-        </div>
-      )
-  }
+  if (!manifest) return <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono scanlines text-action-success animate-pulse">CONNECTING...</div>
 
   const activeJob = manifest.find(j => j.id === activeJobId)
 
-  // If a job is selected, show the Active Job View
   if (activeJob) {
     return (
       <div className="dark min-h-screen bg-background scanlines font-mono text-foreground">
@@ -317,11 +401,8 @@ export default function FieldApp() {
     )
   }
 
-  // --- MANIFEST UI ---
   return (
     <div className="dark min-h-screen bg-background flex flex-col scanlines font-mono text-foreground select-none">
-      
-      {/* iOS-style Status Bar Simulation */}
       <div className="bg-background/90 backdrop-blur px-6 py-2 flex justify-between items-center text-[10px] font-bold text-muted-foreground border-b border-border/50 sticky top-0 z-50">
         <span>08:42 AM</span>
         <div className="flex gap-3">
@@ -330,7 +411,6 @@ export default function FieldApp() {
         </div>
       </div>
 
-      {/* Main Header */}
       <header className="bg-card border-b border-border px-6 py-6 panel-bevel">
         <div className="flex justify-between items-end">
           <div>
@@ -349,7 +429,6 @@ export default function FieldApp() {
         </div>
       </header>
 
-      {/* Scrollable Job List */}
       <main className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
         <div className="flex justify-between items-end px-2 mb-1">
             <h2 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
@@ -365,60 +444,50 @@ export default function FieldApp() {
         )}
 
         {manifest
-            // Sort: Pending first, Complete last
             .sort((a, b) => (a.status === b.status ? 0 : a.status === 'pending' ? -1 : 1))
-            .map((job) => (
-          <button 
-            key={job.id}
-            onClick={() => job.status === 'pending' && setActiveJobId(job.id)}
-            disabled={job.status === 'complete'}
-            className={`group relative w-full text-left bg-card border border-border rounded-xl transition-all overflow-hidden panel-inset shadow-lg
-                ${job.status === 'complete' ? 'opacity-50 grayscale cursor-not-allowed' : 'active:scale-[0.98] active:border-primary/50 hover:border-primary/30'}
-            `}
-          >
-            {/* Priority Status Stripe */}
-            <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                job.status === 'complete' ? 'bg-muted-foreground' :
-                job.priority === 'high' ? 'bg-destructive' : 'bg-action-info'
-            }`} />
-
-            <div className="p-5 pl-6">
-              {/* ID & Priority Badge */}
-              <div className="flex justify-between items-start mb-3">
-                <span className="text-[10px] font-black bg-background/80 px-2 py-1 rounded text-muted-foreground border border-border/50 font-mono">{job.id}</span>
-                {job.status === 'complete' ? (
-                     <span className="flex items-center gap-1 text-[10px] font-black text-action-success uppercase bg-action-success/10 px-2 py-1 rounded border border-action-success/20"><CheckCircle2 className="w-3 h-3" /> Complete</span>
-                ) : job.priority === 'high' && (
-                    <span className="flex items-center gap-1 text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-1 rounded border border-destructive/20"><AlertCircle className="w-3 h-3" /> Priority</span>
-                )}
-              </div>
-
-              {/* Address & Issue */}
-              <div className="flex justify-between items-center gap-4">
-                <div className="flex-1">
-                  <h3 className={`text-lg font-black leading-tight mb-1 ${job.status === 'complete' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{job.address}</h3>
-                  <p className="text-xs font-bold text-primary/90 uppercase tracking-wide truncate">{job.issue}</p>
-                </div>
-                {job.status === 'pending' && <ChevronRight className="w-6 h-6 text-muted-foreground/50 group-hover:text-primary transition-colors"/>}
-              </div>
-
-              {/* Footer Metadata */}
-              <div className="mt-4 pt-3 border-t border-border/50 flex gap-4 text-xs font-bold text-muted-foreground">
-                 <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-action-info" /> {job.distance}</span>
-                 <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" /> {job.timeWindow}</span>
-              </div>
-            </div>
-          </button>
-        ))}
+            .map((job) => {
+              const isUrgent = job.priority === 'high' || job.priority === 'urgent';
+              return (
+                <button 
+                  key={job.id}
+                  onClick={() => job.status === 'pending' && setActiveJobId(job.id)}
+                  disabled={job.status === 'complete'}
+                  className={`group relative w-full text-left bg-card border border-border rounded-xl transition-all overflow-hidden panel-inset shadow-lg
+                      ${job.status === 'complete' ? 'opacity-50 grayscale cursor-not-allowed' : 'active:scale-[0.98] active:border-primary/50 hover:border-primary/30'}
+                  `}
+                >
+                  <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${job.status === 'complete' ? 'bg-muted-foreground' : isUrgent ? 'bg-destructive' : 'bg-action-info'}`} />
+                  <div className="p-5 pl-6">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-[10px] font-black bg-background/80 px-2 py-1 rounded text-muted-foreground border border-border/50 font-mono">{job.id}</span>
+                      {job.status === 'complete' ? (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-action-success uppercase bg-action-success/10 px-2 py-1 rounded border border-action-success/20"><CheckCircle2 className="w-3 h-3" /> Complete</span>
+                      ) : isUrgent && (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-1 rounded border border-destructive/20"><AlertCircle className="w-3 h-3" /> Urgent</span>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center gap-4">
+                      <div className="flex-1">
+                        <h3 className={`text-lg font-black leading-tight mb-1 ${job.status === 'complete' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{job.address}</h3>
+                        <p className="text-xs font-bold text-primary/90 uppercase tracking-wide truncate">{job.issue}</p>
+                      </div>
+                      {job.status === 'pending' && <ChevronRight className="w-6 h-6 text-muted-foreground/50 group-hover:text-primary transition-colors"/>}
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-border/50 flex gap-4 text-xs font-bold text-muted-foreground">
+                      <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-action-info" /> {job.distance}</span>
+                      <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" /> {job.timeWindow}</span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
       </main>
 
-      {/* Footer Action */}
       <footer className="p-4 pb-6 bg-card border-t border-border panel-bevel">
         <button className="w-full h-14 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] hover:bg-secondary/90 transition-colors">
             <Mic className="w-4 h-4" /> Dictate General Log
         </button>
       </footer>
-
     </div>
   )
 }
