@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db, seedDatabase, Job } from "@/lib/db"
-import { supabase } from "@/lib/supabase" // <--- ADDED: Direct Uplink
+import { supabase } from "@/lib/supabase" // <--- DIRECT CLOUD LINK
 import { useTacticalFeedback } from "@/hooks/use-tactical-feedback"
 import { 
   Navigation, 
@@ -17,13 +17,13 @@ import {
   Mic, 
   Battery, 
   Signal, 
-  ArrowLeft,
-  Square,
-  Save,
-  UserCircle2,
-  Power,
-  Loader2,
-  WifiOff
+  ArrowLeft, 
+  Square, 
+  Save, 
+  UserCircle2, 
+  Power, 
+  Loader2, 
+  WifiOff 
 } from "lucide-react"
 
 // --- TYPES ---
@@ -394,7 +394,7 @@ export default function FieldApp() {
     [currentUser]
   )
 
-  useEffect(() => { seedDatabase() }, [])
+  // REMOVED: seedDatabase() to prevent zombie data from reappearing.
 
   // --- UPDATED COMPLETE HANDLER (INSTANT UPLINK) ---
   const handleJobComplete = async (id: string, notes: string) => {
@@ -528,13 +528,8 @@ export default function FieldApp() {
                 trigger("click")
                 const completed = await db.jobs.where('status').equals('complete').toArray();
                 
-                if (completed.length === 0) {
-                    alert("No completed jobs to purge.");
-                    return;
-                }
-
                 // EMERGENCY SYNC: Try to push to cloud before deleting
-                if (navigator.onLine) {
+                if (completed.length > 0 && navigator.onLine) {
                     await supabase.from('jobs').upsert(completed.map(j => ({
                         id: j.id,
                         assignee: j.assignee,
@@ -550,9 +545,9 @@ export default function FieldApp() {
                     })))
                 }
 
-                const ids = completed.map(j => j.id);
-                await db.jobs.bulkDelete(ids);
-                alert("Manifest Cleaned & Synced.");
+                // NUCLEAR OPTION: Clear database to ensure ghosts are gone
+                await db.jobs.clear(); 
+                alert("Local Cache Purged. Waiting for Dispatch...");
             }}
             className="flex-1 h-14 bg-muted/20 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg font-bold text-[10px] uppercase tracking-wide flex items-center justify-center gap-2 panel-inset transition-colors"
         >
