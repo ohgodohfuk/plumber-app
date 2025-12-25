@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db, seedDatabase, Job } from "@/lib/db"
+import { supabase } from "@/lib/supabase" // <--- ADDED: Direct Uplink
+import { useTacticalFeedback } from "@/hooks/use-tactical-feedback"
 import { 
   Navigation, 
   MapPin, 
@@ -36,6 +38,8 @@ const USERS = [
 
 // --- COMPONENT: LOGIN SCREEN ---
 function LoginScreen({ onLogin }: { onLogin: (name: string) => void }) {
+    const { trigger } = useTacticalFeedback()
+
     return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 scanlines font-mono">
             <div className="mb-12 text-center">
@@ -50,7 +54,10 @@ function LoginScreen({ onLogin }: { onLogin: (name: string) => void }) {
                 {USERS.map(user => (
                     <button
                         key={user.id}
-                        onClick={() => onLogin(user.name)}
+                        onClick={() => {
+                            trigger("click")
+                            onLogin(user.name)
+                        }}
                         className="w-full h-16 bg-card border border-border hover:border-primary hover:bg-primary/5 text-left px-6 rounded-xl group transition-all panel-bevel active:scale-[0.98]"
                     >
                         <div className="flex justify-between items-center">
@@ -70,6 +77,7 @@ function LoginScreen({ onLogin }: { onLogin: (name: string) => void }) {
 
 // --- COMPONENT: DEBRIEF MODAL (HYBRID ENGINE) ---
 function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: (notes: string) => void }) {
+    const { trigger } = useTacticalFeedback()
     const [isRecording, setIsRecording] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [useOfflineMode, setUseOfflineMode] = useState(false)
@@ -82,7 +90,7 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
     // 2. Browser Native Refs (Offline Fallback)
     const recognitionRef = useRef<any>(null)
 
-    // INITIALIZE BROWSER ENGINE (Just in case we need it)
+    // INITIALIZE BROWSER ENGINE
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -110,6 +118,7 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
 
     // --- START LOGIC ---
     const startRecording = async () => {
+        trigger("start")
         const isOnline = navigator.onLine
         setUseOfflineMode(!isOnline)
 
@@ -126,11 +135,13 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                 mediaRecorderRef.current.start()
                 setIsRecording(true)
             } catch (err) {
+                trigger("error")
                 console.error("Mic Error:", err)
                 alert("Microphone access denied.")
             }
         } else {
             if (!recognitionRef.current) {
+                trigger("error")
                 alert("Offline voice input not supported in this browser.")
                 return
             }
@@ -145,6 +156,7 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
 
     // --- STOP LOGIC ---
     const stopRecording = () => {
+        trigger("click")
         setIsRecording(false)
 
         if (useOfflineMode && recognitionRef.current) {
@@ -167,8 +179,12 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                     const data = await response.json()
                     
                     if (!response.ok) throw new Error(data.error || "Server Error")
-                    if (data.text) setNotes((prev) => (prev + " " + data.text).trim())
+                    if (data.text) {
+                        setNotes((prev) => (prev + " " + data.text).trim())
+                        trigger("success")
+                    }
                 } catch (error: any) {
+                    trigger("error")
                     console.error("Transcription Failed:", error)
                     alert("Transcription failed. Please type manually.")
                 } finally {
@@ -238,7 +254,10 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
                     disabled={isProcessing}
                  />
                  <button 
-                    onClick={() => onSubmit(notes)} 
+                    onClick={() => {
+                        trigger("success")
+                        onSubmit(notes)
+                    }} 
                     disabled={isProcessing}
                     className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                  >
@@ -251,8 +270,8 @@ function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: 
 }
 
 // --- COMPONENT: ACTIVE JOB VIEW ---
-// UPDATE: onComplete now takes (id, notes)
 function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => void; onComplete: (id: string, notes: string) => void }) {
+  const { trigger } = useTacticalFeedback()
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("idle")
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showDebrief, setShowDebrief] = useState(false)
@@ -260,18 +279,18 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
   const isUrgent = job.priority === 'high' || job.priority === 'urgent';
 
   const handleAction = (step: WorkflowStep) => {
+    trigger("click")
     if (step === "debrief") setShowDebrief(true)
     else setCurrentStep(step)
   }
 
   const handleReset = () => {
+    trigger("click")
     setCurrentStep("idle")
     setShowResetConfirm(false)
   }
 
   const handleDebriefSubmit = (notes: string) => {
-    // We do NOT save to localStorage here anymore for sync.
-    // We pass it to handleJobComplete to save to Dexie.
     setShowDebrief(false)
     onComplete(job.id, notes)
   }
@@ -366,6 +385,7 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
 
 // --- MAIN PAGE: MANIFEST VIEW ---
 export default function FieldApp() {
+  const { trigger } = useTacticalFeedback()
   const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   
@@ -376,14 +396,27 @@ export default function FieldApp() {
 
   useEffect(() => { seedDatabase() }, [])
 
-  // UPDATE: Now accepts notes and saves them to DB
+  // --- UPDATED COMPLETE HANDLER (INSTANT UPLINK) ---
   const handleJobComplete = async (id: string, notes: string) => {
     if (!manifest) return;
+
+    // 1. FIRE AND FORGET UPLOAD
+    supabase.from('jobs').update({ 
+        status: 'complete', 
+        notes: notes,
+        last_updated: Date.now() 
+    }).eq('id', id).then(({ error }) => {
+        if (error) console.error("Cloud Upload Failed:", error)
+        else console.log("✅ Cloud Updated Instantly")
+    })
+
+    // 2. UPDATE LOCAL DB
     await db.jobs.update(id, { 
         status: "complete", 
-        notes: notes, // <--- SAVING NOTES TO DEXIE FOR SYNC
+        notes: notes, 
         lastUpdated: Date.now() 
     })
+    
     setActiveJobId(null)
   }
 
@@ -450,7 +483,12 @@ export default function FieldApp() {
               return (
                 <button 
                   key={job.id}
-                  onClick={() => job.status === 'pending' && setActiveJobId(job.id)}
+                  onClick={() => {
+                      if(job.status === 'pending') {
+                          trigger("click")
+                          setActiveJobId(job.id)
+                      }
+                  }}
                   disabled={job.status === 'complete'}
                   className={`group relative w-full text-left bg-card border border-border rounded-xl transition-all overflow-hidden panel-inset shadow-lg
                       ${job.status === 'complete' ? 'opacity-50 grayscale cursor-not-allowed' : 'active:scale-[0.98] active:border-primary/50 hover:border-primary/30'}
@@ -483,8 +521,45 @@ export default function FieldApp() {
             })}
       </main>
 
-      <footer className="p-4 pb-6 bg-card border-t border-border panel-bevel">
-        <button className="w-full h-14 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] hover:bg-secondary/90 transition-colors">
+      {/* FOOTER: NOW WITH SMART PURGE BUTTON */}
+      <footer className="p-4 pb-6 bg-card border-t border-border panel-bevel flex gap-3">
+        <button 
+            onClick={async () => {
+                trigger("click")
+                const completed = await db.jobs.where('status').equals('complete').toArray();
+                
+                if (completed.length === 0) {
+                    alert("No completed jobs to purge.");
+                    return;
+                }
+
+                // EMERGENCY SYNC: Try to push to cloud before deleting
+                if (navigator.onLine) {
+                    await supabase.from('jobs').upsert(completed.map(j => ({
+                        id: j.id,
+                        assignee: j.assignee,
+                        address: j.address,
+                        issue: j.issue,
+                        notes: j.notes,
+                        distance: j.distance,
+                        est_time: j.estTime,
+                        priority: j.priority,
+                        status: j.status,
+                        time_window: j.timeWindow,
+                        last_updated: j.lastUpdated
+                    })))
+                }
+
+                const ids = completed.map(j => j.id);
+                await db.jobs.bulkDelete(ids);
+                alert("Manifest Cleaned & Synced.");
+            }}
+            className="flex-1 h-14 bg-muted/20 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg font-bold text-[10px] uppercase tracking-wide flex items-center justify-center gap-2 panel-inset transition-colors"
+        >
+            <X className="w-4 h-4" /> Purge Done
+        </button>
+
+        <button className="flex-[2] h-14 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] hover:bg-secondary/90 transition-colors">
             <Mic className="w-4 h-4" /> Dictate General Log
         </button>
       </footer>

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db } from "@/lib/db"
+import { supabase } from "@/lib/supabase"
 import { 
   LayoutDashboard, 
   Users, 
@@ -50,62 +51,6 @@ interface LogEntry {
   invoiceData?: InvoiceData
 }
 
-// --- MOCK DATA ---
-const INITIAL_FEED: LogEntry[] = [
-  {
-    id: "LOG-9920",
-    tech: "S. Connor",
-    time: "15 mins ago",
-    type: "status",
-    content: "Arrived at 880 Industrial Park. Started pressure test. Access code was correct.",
-    status: "logged"
-  },
-  {
-    id: "LOG-9919",
-    tech: "J. Mason",
-    time: "45 mins ago",
-    type: "delay",
-    content: "Parts Run: Home Depot. 15m traffic delay on the bridge. Will be late to next site.",
-    status: "reviewed"
-  },
-  {
-    id: "LOG-9918",
-    tech: "Auto-System",
-    time: "1 hour ago",
-    type: "invoice",
-    content: "Job complete at 124 Maple Ave. Invoice generated for review.",
-    status: "pending",
-    invoiceData: {
-      customer: "Jane Doe",
-      address: "124 Maple Ave\nLethbridge, AB T1K 3M4",
-      items: [
-        { desc: "Service Call - Standard Diagnostic", qty: 1, price: 120.00 },
-        { desc: "Pipe Fitting Replacement (Copper 1/2\")", qty: 2, price: 45.50 },
-        { desc: "Labor (Hours)", qty: 1.5, price: 95.00 }
-      ],
-      total: 353.50,
-      notes: "Replaced corroded fitting under kitchen sink. Tested for leaks. System holding pressure.",
-      sms: "Hi Jane, your invoice for today's plumbing service is ready. Total: $371.18. You can pay securely here: [LINK]"
-    }
-  },
-  {
-    id: "LOG-9917",
-    tech: "System",
-    time: "2 hours ago",
-    type: "alert",
-    content: "Morning briefing complete. All units deployed. Weather alert: High winds warning.",
-    status: "system"
-  },
-  {
-    id: "LOG-9916",
-    tech: "Ripley, E.",
-    time: "3 hours ago",
-    type: "status",
-    content: "Checked into HQ for inventory resupply. Loaded Unit 303 with 50ft PEX.",
-    status: "logged"
-  }
-]
-
 const TEAM_MEMBERS = [
   { id: "247", name: "Mason, J.", status: "working", location: "124 Maple Ave" },
   { id: "104", name: "Connor, S.", status: "traveling", location: "En Route -> Job 4822" },
@@ -115,6 +60,9 @@ const TEAM_MEMBERS = [
 // --- COMPONENT: EXPANDABLE TEXT ---
 function ExpandableText({ text, limit = 80, className = "" }: { text: string, limit?: number, className?: string }) {
   const [isExpanded, setIsExpanded] = useState(false)
+  
+  if (!text) return <span className="italic text-muted-foreground">No details provided.</span>
+
   const shouldTruncate = text.length > limit
 
   if (!shouldTruncate) {
@@ -149,7 +97,7 @@ function DispatchModal({ onClose, onDispatch }: { onClose: () => void, onDispatc
     const [tech, setTech] = useState('')
     const [address, setAddress] = useState('')
     const [issue, setIssue] = useState('')
-    const [notes, setNotes] = useState('') // New Notes Field
+    const [notes, setNotes] = useState('') 
 
     const handleSubmit = () => {
         if(!tech || !address || !issue) return;
@@ -275,7 +223,9 @@ function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onCl
     const today = new Date();
     const dateStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const dueDate = new Date(today);
+    // --- FIX: Removed 'const' keyword here ---
     dueDate.setDate(dueDate.getDate() + 14); // Net 14
+    // ----------------------------------------
     const dueDateStr = dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     // ACTION: PRINT TO PDF
@@ -376,15 +326,13 @@ function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onCl
                                 </tr>
                             ))}
                         </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colSpan={2} className="pt-4 text-right text-xs font-bold text-muted-foreground uppercase">Subtotal</td>
+                                <td className="pt-4 text-right text-xl font-black text-action-success">${subtotal.toFixed(2)}</td>
+                            </tr>
+                        </tfoot>
                     </table>
-                </div>
-
-                <div className="flex justify-end mb-16">
-                    <div className="w-1/2 max-w-xs">
-                        <div className="flex justify-between py-2 border-b border-gray-100"><span className="text-gray-600">Subtotal</span><span className="font-bold">${subtotal.toFixed(2)}</span></div>
-                        <div className="flex justify-between py-2 border-b border-gray-100"><span className="text-gray-600">GST (5%)</span><span className="font-bold">${taxAmount.toFixed(2)}</span></div>
-                        <div className="flex justify-between py-4 border-b-2 border-black mt-2"><span className="text-xl font-black">Total</span><span className="text-xl font-black">${grandTotal.toFixed(2)}</span></div>
-                    </div>
                 </div>
                 
                 <div className="text-center text-xs text-gray-400 mt-auto pt-8">
@@ -500,86 +448,114 @@ function InvoiceReviewModal({ data, onClose, onSend }: { data: InvoiceData, onCl
 export default function CommandDashboard() {
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceData | null>(null)
   const [showDispatch, setShowDispatch] = useState(false)
-  const [feed, setFeed] = useState<LogEntry[]>(INITIAL_FEED)
+  const [feed, setFeed] = useState<LogEntry[]>([]) // <--- REPLACED INITIAL_FEED WITH EMPTY ARRAY
   
   // --- PAGINATION STATE ---
   const [currentPage, setCurrentPage] = useState(1)
   const LOGS_PER_PAGE = 5
-  const totalPages = Math.ceil(feed.length / LOGS_PER_PAGE)
+  // Note: We use Math.max(1, ...) to prevent 0 pages if feed is empty
+  const totalPages = Math.max(1, Math.ceil(feed.length / LOGS_PER_PAGE))
   const paginatedFeed = feed.slice((currentPage - 1) * LOGS_PER_PAGE, currentPage * LOGS_PER_PAGE)
 
   // --- NEW: MANAGER CONTROL FUNCTIONS ---
   
-  // 1. Create a job in the REAL database
+  // 1. Create a job in the REAL database (SUPABASE)
   const handleCreateDispatch = async (details: any) => {
-      // Add to Feed (Visual)
-      const newLog: LogEntry = {
-          id: `LOG-${Math.floor(Math.random() * 10000)}`,
-          tech: "System",
-          time: "Just now",
-          type: details.priority === 'urgent' ? 'alert' : 'dispatch',
-          content: `Dispatch Sent: ${details.tech} assigned to ${details.address}. Priority: ${details.priority.toUpperCase()}. Issue: ${details.issue}`,
-          status: 'sent'
+      const newJob = {
+        id: `JOB-${Math.floor(Math.random() * 10000)}`,
+        assignee: details.tech,
+        address: details.address,
+        issue: details.issue, // Short Title
+        notes: details.notes || "No dispatcher notes provided.", // Long Notes
+        distance: "Calculating...", // Placeholder for GPS logic
+        est_time: "15 min",
+        priority: details.priority,
+        status: 'pending',
+        time_window: 'ASAP',
+        last_updated: Date.now()
       }
-      setFeed(prev => [newLog, ...prev])
-      setCurrentPage(1)
 
-      // Add to Dexie DB (Actual Logic)
-      try {
-        await db.jobs.add({
-            id: `JOB-${Math.floor(Math.random() * 10000)}`,
-            assignee: details.tech,
-            address: details.address,
-            issue: details.issue, // The Short Title
-            notes: details.notes || "No dispatcher notes provided.", // The Long Notes
-            distance: "Calculating...", 
-            estTime: "15 min",
-            priority: details.priority,
-            status: 'pending',
-            timeWindow: 'ASAP'
-        })
-        console.log("Job transmitted to field units.")
-      } catch (e) {
-        console.error("Transmission failed:", e)
+      // SEND TO CLOUD (Supabase)
+      const { error } = await supabase.from('jobs').insert(newJob)
+
+      if (error) {
+          alert("Dispatch Failed: " + error.message)
+      } else {
+          // Success! (Realtime listener will update the feed automatically)
+          console.log("Job transmitted to field units via Satellite.")
       }
   }
 
-  // 2. Erase completed jobs from the database
+  // 2. Erase completed jobs from the database (SUPABASE)
   const handlePurgeHistory = async () => {
-    const deletedCount = await db.jobs.where('status').equals('complete').delete()
-    alert(`COMMAND: Cleared ${deletedCount} completed mission logs from field units.`)
+    if(!confirm("COMMAND: Are you sure? This will delete ALL completed jobs from the database permanently.")) return;
+    
+    // Dexie Delete
+    await db.jobs.where('status').equals('complete').delete()
+
+    // Supabase Delete
+    const { count, error } = await supabase
+        .from('jobs')
+        .delete({ count: 'exact' })
+        .eq('status', 'complete')
+
+    if (error) alert("Purge Failed: " + error.message)
+    else alert(`COMMAND: Cleared ${count || 0} completed mission logs from the Cloud.`)
   }
 
-  // --- HANDLER: INVOICE SENT ---
   const handleInvoiceSent = () => {
-      const newLog: LogEntry = {
-          id: `LOG-${Math.floor(Math.random() * 10000)}`,
-          tech: "Accounts",
-          time: "Just now",
-          type: 'status',
-          content: `Invoice sent to Jane Doe (124 Maple Ave) via SMS. Awaiting payment.`,
-          status: 'success'
-      }
-      setFeed(prev => [newLog, ...prev])
-      setCurrentPage(1)
+      alert("Invoice Sent via SMS.")
   }
 
-  // --- SYNC LOGIC ---
+  // --- SYNC LOGIC (CONNECT TO SUPABASE) ---
   useEffect(() => {
-    const syncLogs = () => {
-        const storedLogs = localStorage.getItem("plumber_ops_logs")
-        if (storedLogs) {
-            const parsedLogs = JSON.parse(storedLogs) as LogEntry[]
-            setFeed(prev => {
-                const combined = [...parsedLogs, ...INITIAL_FEED]
-                const unique = Array.from(new Map(combined.map(item => [item.id, item])).values())
-                return unique
-            })
+    const fetchLiveFeed = async () => {
+        // Fetch ALL jobs from Cloud
+        const { data, error } = await supabase
+            .from('jobs')
+            .select('*')
+            .order('last_updated', { ascending: false })
+
+        if (data) {
+            // Transform Supabase rows into LogEntry format for the Feed
+            const logs: LogEntry[] = data.map((job: any) => ({
+                id: job.id,
+                tech: job.assignee,
+                time: new Date(job.last_updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                // Logic: If completed, show as Invoice ready. If pending, show as Dispatch active.
+                type: job.status === 'complete' ? 'invoice' : 'dispatch',
+                content: job.status === 'complete' 
+                    ? `Job Complete at ${job.address}. Notes: "${job.notes || 'No notes'}"`
+                    : `Dispatch Active: ${job.issue} at ${job.address}`,
+                status: job.status,
+                // Mock Invoice Data generator (Since we don't store line items in DB yet)
+                invoiceData: job.status === 'complete' ? {
+                    customer: "Resident",
+                    address: job.address,
+                    items: [
+                        { desc: "Service Call", qty: 1, price: 150.00 },
+                        { desc: "Labor", qty: 1, price: 85.00 }
+                    ],
+                    total: 235.00,
+                    notes: job.notes || "No notes recorded.",
+                    sms: `Your service at ${job.address} is complete. Total: $235.00.`
+                } : undefined
+            }))
+            setFeed(logs)
         }
     }
-    syncLogs()
-    window.addEventListener("storage", syncLogs)
-    return () => window.removeEventListener("storage", syncLogs)
+
+    fetchLiveFeed()
+
+    // REALTIME LISTENER
+    const channel = supabase
+        .channel('dashboard-feed')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => {
+            fetchLiveFeed()
+        })
+        .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   return (
@@ -643,7 +619,7 @@ export default function CommandDashboard() {
                 className="w-full flex items-center gap-2 px-4 py-3 text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/30 rounded-lg transition-all"
             >
                 <Trash2 className="w-4 h-4" />
-                <span className="text-xs font-bold uppercase">Purge Completed Jobs</span>
+                <span className="text-xs font-bold uppercase">Purge Cloud History</span>
             </button>
         </div>
       </aside>
@@ -684,7 +660,10 @@ export default function CommandDashboard() {
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Daily Revenue</span>
                         <DollarSign className="w-4 h-4 text-action-success" />
                     </div>
-                    <div className="text-3xl font-black text-foreground">$4,250</div>
+                    {/* Mock Revenue Calc based on completed jobs */}
+                    <div className="text-3xl font-black text-foreground">
+                        ${feed.filter(f => f.status === 'complete').length * 250}
+                    </div>
                     <div className="text-xs font-medium text-action-success mt-1 flex items-center gap-1">
                         <TrendingUp className="w-3 h-3" /> +12% vs avg
                     </div>
@@ -694,17 +673,16 @@ export default function CommandDashboard() {
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Active Jobs</span>
                         <Clock className="w-4 h-4 text-action-warning" />
                     </div>
-                    <div className="text-3xl font-black text-foreground">8</div>
-                    <div className="text-xs font-medium text-muted-foreground mt-1">2 Pending Dispatch</div>
+                    <div className="text-3xl font-black text-foreground">{feed.filter(f => f.status === 'pending').length}</div>
+                    <div className="text-xs font-medium text-muted-foreground mt-1">Pending Dispatch</div>
                 </div>
-                {/* PENDING QUOTES */}
                 <div className="bg-card border border-border p-5 rounded-xl panel-bevel flex flex-col justify-center">
                     <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Pending Quotes</span>
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Completed</span>
                         <ClipboardList className="w-4 h-4 text-primary" />
                     </div>
-                    <div className="text-3xl font-black text-foreground">5</div>
-                    <div className="text-xs font-medium text-primary mt-1">Needs Review</div>
+                    <div className="text-3xl font-black text-foreground">{feed.filter(f => f.status === 'complete').length}</div>
+                    <div className="text-xs font-medium text-primary mt-1">Jobs Today</div>
                 </div>
                 
                 {/* DISPATCH ACTION CARD */}
@@ -725,7 +703,7 @@ export default function CommandDashboard() {
             {/* LIVE MAP & UNITS (Main Area - Fills remaining height) */}
             <div className="col-span-8 flex flex-col h-full overflow-hidden">
                 <div className="flex-1 bg-card border border-border rounded-xl panel-inset relative overflow-hidden">
-                     <div className="absolute inset-0 opacity-20"
+                      <div className="absolute inset-0 opacity-20"
                         style={{
                             backgroundImage: `linear-gradient(to right, var(--color-primary) 1px, transparent 1px), linear-gradient(to bottom, var(--color-primary) 1px, transparent 1px)`,
                             backgroundSize: "40px 40px",
@@ -759,18 +737,23 @@ export default function CommandDashboard() {
                     <h2 className="text-xs font-black text-foreground uppercase tracking-widest flex items-center gap-2">
                         Activity Log
                     </h2>
-                    <span className="text-[10px] font-bold text-muted-foreground">TODAY</span>
+                    <span className="text-[10px] font-bold text-muted-foreground">LIVE</span>
                 </div>
                 
                 {/* Feed List (Paginated) */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {feed.length === 0 && (
+                        <div className="text-center p-8 opacity-50">
+                            <p className="text-xs font-bold uppercase">No activity recorded.</p>
+                        </div>
+                    )}
+
                     {paginatedFeed.map((log) => (
                         <div key={log.id} className="group relative bg-background border border-border rounded-lg p-3 transition-all hover:border-primary/50 animate-in slide-in-from-right-2 duration-300">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
                                     log.type === 'invoice' ? 'bg-action-success/10 text-action-success' :
                                     log.type === 'alert' ? 'bg-destructive/10 text-destructive animate-pulse' :
-                                    log.type === 'delay' ? 'bg-destructive/10 text-destructive' :
                                     log.type === 'dispatch' ? 'bg-primary/10 text-primary' :
                                     'bg-muted/50 text-muted-foreground'
                                 }`}>
@@ -798,27 +781,27 @@ export default function CommandDashboard() {
                     ))}
                 </div>
 
-                {/* PAGINATION CONTROLS (THE ARROW SELECTOR) */}
+                {/* PAGINATION CONTROLS */}
                 <div className="p-3 border-t border-border bg-muted/10 flex items-center justify-between shrink-0">
-                     <button 
+                      <button 
                         onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                         disabled={currentPage === 1}
                         className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
+                      >
                         <ChevronLeft className="w-4 h-4" />
-                     </button>
-                     
-                     <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                      </button>
+                      
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
                         Page {currentPage} of {totalPages}
-                     </span>
+                      </span>
 
-                     <button 
+                      <button 
                         onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={currentPage === totalPages}
+                        disabled={currentPage >= totalPages}
                         className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
+                      >
                         <ChevronRight className="w-4 h-4" />
-                     </button>
+                      </button>
                 </div>
 
             </div>
