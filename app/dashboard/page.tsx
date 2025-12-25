@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useLiveQuery } from "dexie-react-hooks"
+import { db } from "@/lib/db"
 import { 
   LayoutDashboard, 
   Users, 
@@ -24,7 +26,8 @@ import {
   ChevronRight,
   Printer,
   Radio,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from "lucide-react"
 
 // --- TYPES ---
@@ -146,16 +149,17 @@ function DispatchModal({ onClose, onDispatch }: { onClose: () => void, onDispatc
     const [tech, setTech] = useState('')
     const [address, setAddress] = useState('')
     const [issue, setIssue] = useState('')
+    const [notes, setNotes] = useState('') // New Notes Field
 
     const handleSubmit = () => {
         if(!tech || !address || !issue) return;
-        onDispatch({ priority, tech, address, issue })
+        onDispatch({ priority, tech, address, issue, notes })
         onClose()
     }
 
     return (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-in fade-in zoom-in-95 duration-200">
-             <div className="bg-card border border-border w-full max-w-lg rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col">
+             <div className="bg-card border border-border w-full max-w-lg rounded-xl shadow-2xl overflow-hidden panel-bevel flex flex-col max-h-[90vh]">
                 <div className="bg-muted/30 border-b border-border p-6 flex justify-between items-center">
                     <div>
                         <h2 className="text-xl font-black text-foreground uppercase tracking-tight flex items-center gap-2">
@@ -167,7 +171,7 @@ function DispatchModal({ onClose, onDispatch }: { onClose: () => void, onDispatc
                     </button>
                 </div>
                 
-                <div className="p-6 space-y-6">
+                <div className="p-6 space-y-6 overflow-y-auto">
                     <div className="grid grid-cols-3 gap-3">
                         {['low', 'normal', 'urgent'].map((p) => (
                             <button 
@@ -223,11 +227,22 @@ function DispatchModal({ onClose, onDispatch }: { onClose: () => void, onDispatc
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Issue Description</label>
-                            <textarea 
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Job Title (Short)</label>
+                            <input 
+                                type="text"
                                 value={issue}
                                 onChange={(e) => setIssue(e.target.value)}
-                                placeholder="Describe the job..."
+                                placeholder="e.g. Leaking Water Heater"
+                                className="w-full bg-muted/20 border border-border rounded p-3 text-sm font-mono text-foreground focus:outline-none focus:border-primary/50 placeholder:text-muted-foreground/30"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase">Dispatcher Notes (Detailed)</label>
+                            <textarea 
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                                placeholder="Gate codes, warnings, specific parts needed..."
                                 className="w-full bg-muted/20 border border-border rounded p-3 text-sm font-mono text-foreground focus:outline-none focus:border-primary/50 h-24 resize-none placeholder:text-muted-foreground/30"
                             />
                         </div>
@@ -493,8 +508,11 @@ export default function CommandDashboard() {
   const totalPages = Math.ceil(feed.length / LOGS_PER_PAGE)
   const paginatedFeed = feed.slice((currentPage - 1) * LOGS_PER_PAGE, currentPage * LOGS_PER_PAGE)
 
-  // --- HANDLER: CREATE NEW DISPATCH ---
-  const handleCreateDispatch = (details: any) => {
+  // --- NEW: MANAGER CONTROL FUNCTIONS ---
+  
+  // 1. Create a job in the REAL database
+  const handleCreateDispatch = async (details: any) => {
+      // Add to Feed (Visual)
       const newLog: LogEntry = {
           id: `LOG-${Math.floor(Math.random() * 10000)}`,
           tech: "System",
@@ -504,7 +522,32 @@ export default function CommandDashboard() {
           status: 'sent'
       }
       setFeed(prev => [newLog, ...prev])
-      setCurrentPage(1) // Return to first page on new entry
+      setCurrentPage(1)
+
+      // Add to Dexie DB (Actual Logic)
+      try {
+        await db.jobs.add({
+            id: `JOB-${Math.floor(Math.random() * 10000)}`,
+            assignee: details.tech,
+            address: details.address,
+            issue: details.issue, // The Short Title
+            notes: details.notes || "No dispatcher notes provided.", // The Long Notes
+            distance: "Calculating...", 
+            estTime: "15 min",
+            priority: details.priority,
+            status: 'pending',
+            timeWindow: 'ASAP'
+        })
+        console.log("Job transmitted to field units.")
+      } catch (e) {
+        console.error("Transmission failed:", e)
+      }
+  }
+
+  // 2. Erase completed jobs from the database
+  const handlePurgeHistory = async () => {
+    const deletedCount = await db.jobs.where('status').equals('complete').delete()
+    alert(`COMMAND: Cleared ${deletedCount} completed mission logs from field units.`)
   }
 
   // --- HANDLER: INVOICE SENT ---
@@ -528,11 +571,7 @@ export default function CommandDashboard() {
         if (storedLogs) {
             const parsedLogs = JSON.parse(storedLogs) as LogEntry[]
             setFeed(prev => {
-                // Ensure unique IDs if possible, or just overwrite for prototype
-                // We combine new live logs with the mock initial logs
-                // In a real app, this would be a DB query
                 const combined = [...parsedLogs, ...INITIAL_FEED]
-                // Deduplicate by ID
                 const unique = Array.from(new Map(combined.map(item => [item.id, item])).values())
                 return unique
             })
@@ -595,6 +634,18 @@ export default function CommandDashboard() {
             <span className="text-sm font-bold uppercase tracking-wide">Invoices</span>
           </button>
         </nav>
+        
+        {/* NEW: MANAGER TOOLS */}
+        <div className="p-4 border-t border-border">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-2 px-2">Manager Tools</span>
+            <button 
+                onClick={handlePurgeHistory}
+                className="w-full flex items-center gap-2 px-4 py-3 text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/30 rounded-lg transition-all"
+            >
+                <Trash2 className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase">Purge Completed Jobs</span>
+            </button>
+        </div>
       </aside>
 
       {/* MAIN CONTENT GRID - LOCKED HEIGHT (No scrolling window) */}

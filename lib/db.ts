@@ -1,44 +1,44 @@
 // lib/db.ts
 import Dexie, { Table } from 'dexie';
 
-// 1. Define what a "Job" looks like in the database
 export interface Job {
   id: string;
+  assignee: string; // <--- NEW FIELD
   address: string;
   issue: string;
   notes: string;
   distance: string;
   estTime: string;
   priority: 'high' | 'normal' | 'low';
-  status: 'pending' | 'complete'; // Simplified status for the manifest
+  status: 'pending' | 'traveling' | 'arrived' | 'complete';
   timeWindow: string;
   lastUpdated?: number; 
 }
 
-// 2. Create the Database Class
 export class IronCladDB extends Dexie {
   jobs!: Table<Job>;
 
   constructor() {
     super('IronCladDB');
-    this.version(1).stores({
-      jobs: 'id, status, priority' // These are the fields we can query fast
+    this.version(2).stores({ // <--- BUMPED VERSION TO 2
+      jobs: 'id, assignee, status, priority' 
     });
   }
 }
 
 export const db = new IronCladDB();
 
-// 3. Seed Data (So you have something to see immediately)
+// Seed with assigned jobs
 export const seedDatabase = async () => {
     const count = await db.jobs.count();
     if (count === 0) {
         await db.jobs.bulkAdd([
             {
                 id: "JOB-4821",
+                assignee: "Mason, J.",
                 address: "124 Maple Ave, Unit 3B",
                 issue: "Burst Pipe - Kitchen Sink",
-                notes: "Customer reports water leaking from cabinet. Main shutoff valve already closed.",
+                notes: "Water leaking from cabinet. Shutoff valve closed.",
                 distance: "3.2 mi",
                 estTime: "8 min",
                 priority: "high",
@@ -47,6 +47,7 @@ export const seedDatabase = async () => {
             },
             {
                 id: "JOB-4822",
+                assignee: "Connor, S.",
                 address: "880 Industrial Park Rd",
                 issue: "Backflow Preventer Test",
                 notes: "Annual commercial testing. Access code: 1234#",
@@ -55,17 +56,6 @@ export const seedDatabase = async () => {
                 priority: "normal",
                 status: "pending",
                 timeWindow: "10:30 - 12:00"
-            },
-            {
-                id: "JOB-4823",
-                address: "15 West Main St",
-                issue: "Water Heater Install",
-                notes: "Replace 40G electric. Unit is in the garage.",
-                distance: "12.1 mi",
-                estTime: "22 min",
-                priority: "normal",
-                status: "pending",
-                timeWindow: "13:00 - 16:00"
             }
         ]);
     }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { db, seedDatabase, Job } from "@/lib/db"
@@ -17,81 +17,120 @@ import {
   Signal, 
   ArrowLeft,
   Square,
-  Save
+  Save,
+  UserCircle2,
+  Power
 } from "lucide-react"
 
 // --- TYPES ---
-
 type WorkflowStep = "idle" | "traveling" | "arrived" | "debrief" | "complete"
 
-// Note: The 'Job' interface is now imported from @/lib/db to ensure consistency
-// We keep WorkflowStep here as it is UI state specific
+// --- MOCK USERS FOR LOGIN ---
+const USERS = [
+    { name: "Mason, J.", id: "247" },
+    { name: "Connor, S.", id: "104" },
+    { name: "Ripley, E.", id: "303" }
+]
 
-// --- COMPONENT: DEBRIEF MODAL (The Voice Recorder) ---
-// Now accepts 'notes' as an argument to submit
+// --- COMPONENT: LOGIN SCREEN ---
+function LoginScreen({ onLogin }: { onLogin: (name: string) => void }) {
+    return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 scanlines font-mono">
+            <div className="mb-12 text-center">
+                <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-primary/50 animate-pulse">
+                    <UserCircle2 className="w-8 h-8 text-primary" />
+                </div>
+                <h1 className="text-2xl font-black text-foreground uppercase tracking-widest mb-2">Identify</h1>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Select active field unit</p>
+            </div>
+
+            <div className="w-full max-w-sm space-y-3">
+                {USERS.map(user => (
+                    <button
+                        key={user.id}
+                        onClick={() => onLogin(user.name)}
+                        className="w-full h-16 bg-card border border-border hover:border-primary hover:bg-primary/5 text-left px-6 rounded-xl group transition-all panel-bevel active:scale-[0.98]"
+                    >
+                        <div className="flex justify-between items-center">
+                            <span className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">{user.name}</span>
+                            <span className="text-[10px] font-black bg-muted/50 px-2 py-1 rounded text-muted-foreground group-hover:text-primary">UNIT {user.id}</span>
+                        </div>
+                    </button>
+                ))}
+            </div>
+            
+            <div className="mt-12 text-center opacity-30">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase">IronClad Field Ops v1.0</p>
+            </div>
+        </div>
+    )
+}
+
+// --- COMPONENT: DEBRIEF MODAL (Voice) ---
 function DebriefModal({ onCancel, onSubmit }: { onCancel: () => void, onSubmit: (notes: string) => void }) {
     const [isRecording, setIsRecording] = useState(false)
     const [notes, setNotes] = useState("")
+    const recognitionRef = useRef<any>(null)
+    
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+            if (SpeechRecognition) {
+                const recognition = new SpeechRecognition()
+                recognition.continuous = true
+                recognition.interimResults = true
+                recognition.lang = 'en-US'
+                recognition.onresult = (event: any) => {
+                    let transcript = ''
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        if (event.results[i].isFinal) {
+                            transcript += event.results[i][0].transcript + ' '
+                        }
+                    }
+                    if (transcript) setNotes(prev => (prev + transcript).trim() + " ")
+                }
+                recognitionRef.current = recognition
+            }
+        }
+    }, [])
+
+    const startListening = () => {
+        if (!recognitionRef.current) {
+            alert("Voice input not supported in this browser.")
+            return
+        }
+        setIsRecording(true)
+        try { recognitionRef.current.start() } catch (e) { console.error(e) }
+    }
+
+    const stopListening = () => {
+        setIsRecording(false)
+        if (recognitionRef.current) recognitionRef.current.stop()
+    }
     
     return (
         <div className="fixed inset-0 bg-background/95 backdrop-blur-md z-50 flex flex-col p-6 animate-in fade-in duration-200">
-            {/* Modal Header */}
             <div className="flex justify-between items-center mb-8 border-b border-border/50 pb-4">
-                <h2 className="text-xl font-black uppercase text-foreground tracking-widest">
-                    Mission Debrief
-                </h2>
-                <button onClick={onCancel} className="p-2 text-muted-foreground hover:text-foreground">
-                    <X className="w-8 h-8" />
-                </button>
+                <h2 className="text-xl font-black uppercase text-foreground tracking-widest">Mission Debrief</h2>
+                <button onClick={onCancel} className="p-2 text-muted-foreground hover:text-foreground"><X className="w-8 h-8" /></button>
             </div>
-
-            {/* Recording Interface */}
             <div className="flex-1 flex flex-col items-center justify-center gap-8">
                 <div 
-                    className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-300 ${
-                        isRecording 
-                        ? 'bg-destructive/20 border-4 border-destructive shadow-[0_0_50px_var(--color-destructive)]' 
-                        : 'bg-secondary border-4 border-border'
-                    }`}
-                    onMouseDown={() => setIsRecording(true)}
-                    onMouseUp={() => setIsRecording(false)}
-                    onTouchStart={() => setIsRecording(true)}
-                    onTouchEnd={() => setIsRecording(false)}
+                    className={`relative w-48 h-48 rounded-full flex items-center justify-center transition-all duration-300 ${isRecording ? 'bg-destructive/20 border-4 border-destructive shadow-[0_0_50px_var(--color-destructive)] scale-110' : 'bg-secondary border-4 border-border'}`}
+                    onMouseDown={startListening} onMouseUp={stopListening} onMouseLeave={stopListening}
+                    onTouchStart={(e) => { e.preventDefault(); startListening() }} onTouchEnd={(e) => { e.preventDefault(); stopListening() }}
                 >
                     <div className={`absolute inset-0 rounded-full border border-destructive opacity-0 ${isRecording ? 'animate-ping opacity-100' : ''}`} />
-                    
-                    {isRecording ? (
-                        <Square className="w-16 h-16 text-destructive fill-current" />
-                    ) : (
-                        <Mic className="w-16 h-16 text-foreground" />
-                    )}
+                    {isRecording ? <Square className="w-16 h-16 text-destructive fill-current" /> : <Mic className="w-16 h-16 text-foreground" />}
                 </div>
-
                 <div className="text-center space-y-2">
-                    <h3 className={`text-2xl font-black uppercase tracking-widest ${isRecording ? 'text-destructive animate-pulse' : 'text-muted-foreground'}`}>
-                        {isRecording ? "RECORDING..." : "HOLD TO RECORD"}
-                    </h3>
-                    <p className="text-xs font-mono text-muted-foreground max-w-[200px] mx-auto">
-                        Dictate work performed, parts used, and any follow-up requirements.
-                    </p>
+                    <h3 className={`text-2xl font-black uppercase tracking-widest ${isRecording ? 'text-destructive animate-pulse' : 'text-muted-foreground'}`}>{isRecording ? "LISTENING..." : "HOLD TO SPEAK"}</h3>
+                    <p className="text-xs font-mono text-muted-foreground max-w-[200px] mx-auto">AI will transcribe your voice logs directly.</p>
                 </div>
             </div>
-
-            {/* Manual Notes Fallback */}
             <div className="mt-auto space-y-4">
-                 <textarea 
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Or type manual notes here..."
-                    className="w-full bg-card border border-border rounded-xl p-4 min-h-[100px] text-sm font-mono focus:border-primary transition-colors panel-inset"
-                 />
-                 <button 
-                    onClick={() => onSubmit(notes)}
-                    className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98]"
-                 >
-                    <Save className="w-5 h-5" />
-                    Submit & Close Job
-                 </button>
+                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Transcription appears here..." className="w-full bg-card border border-border rounded-xl p-4 min-h-[100px] text-sm font-mono focus:border-primary transition-colors panel-inset" />
+                 <button onClick={() => onSubmit(notes)} className="w-full h-16 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98]"><Save className="w-5 h-5" /> Submit & Close Job</button>
             </div>
         </div>
     )
@@ -104,11 +143,8 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
   const [showDebrief, setShowDebrief] = useState(false)
 
   const handleAction = (step: WorkflowStep) => {
-    if (step === "debrief") {
-        setShowDebrief(true)
-    } else {
-        setCurrentStep(step)
-    }
+    if (step === "debrief") setShowDebrief(true)
+    else setCurrentStep(step)
   }
 
   const handleReset = () => {
@@ -116,14 +152,10 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
     setShowResetConfirm(false)
   }
 
-  // --- THE SYNC LOGIC ---
-  // This sends the data to the "Cloud" (Browser LocalStorage)
   const handleDebriefSubmit = (notes: string) => {
-    
-    // 1. Create the Log Entry
     const newLog = {
         id: `LOG-${Date.now()}`,
-        tech: "Unit 247 (You)",
+        tech: job.assignee, // Use real assignee from job
         time: "Just now",
         type: "invoice",
         content: `Job ${job.id} Complete. ${notes || "No notes provided."}`,
@@ -131,23 +163,21 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
         invoiceData: {
             customer: "Lethbridge Resident",
             address: job.address,
-            items: [
-                { desc: "Service Call (Standard)", qty: 1, price: 150.00 },
-                { desc: "Labor / Parts", qty: 1, price: 85.00 }
-            ],
+            items: [{ desc: "Service Call", qty: 1, price: 150.00 }, { desc: "Labor", qty: 1, price: 85.00 }],
             total: 235.00,
             notes: notes,
-            sms: `Your service at ${job.address} is complete. Total: $235.00. Invoice sent.`
+            sms: `Your service at ${job.address} is complete. Total: $235.00.`
         }
     }
+    
+    // Optimistic Update to LocalStorage for Dashboard Sync
+    if (typeof window !== 'undefined') {
+        const existingLogs = JSON.parse(localStorage.getItem("plumber_ops_logs") || "[]")
+        localStorage.setItem("plumber_ops_logs", JSON.stringify([newLog, ...existingLogs]))
+        // Trigger storage event manually if in same tab context (though usually dashboard is separate)
+        window.dispatchEvent(new Event("storage"))
+    }
 
-    // 2. Save to Browser Storage
-    // This allows the Dashboard to see it immediately if opened in another window
-    const existingLogs = JSON.parse(localStorage.getItem("plumber_ops_logs") || "[]")
-    const updatedLogs = [newLog, ...existingLogs]
-    localStorage.setItem("plumber_ops_logs", JSON.stringify(updatedLogs))
-
-    // 3. Close Workflow
     setShowDebrief(false)
     onComplete(job.id)
   }
@@ -156,21 +186,10 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
 
   return (
     <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300">
-      
-      {/* DEBRIEF MODAL OVERLAY */}
-      {showDebrief && (
-        <DebriefModal 
-            onCancel={() => setShowDebrief(false)}
-            onSubmit={handleDebriefSubmit}
-        />
-      )}
-
-      {/* Job Header */}
+      {showDebrief && <DebriefModal onCancel={() => setShowDebrief(false)} onSubmit={handleDebriefSubmit} />}
       <header className="w-full bg-card border-b border-border px-4 py-4 panel-bevel flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
-            <button onClick={onBack} className="p-2 -ml-2 text-muted-foreground hover:text-foreground">
-                <ArrowLeft className="w-6 h-6" />
-            </button>
+            <button onClick={onBack} className="p-2 -ml-2 text-muted-foreground hover:text-foreground"><ArrowLeft className="w-6 h-6" /></button>
             <div>
                  <div className="flex items-center gap-2">
                     <span className="w-2 h-2 bg-action-success rounded-full animate-pulse" />
@@ -179,136 +198,63 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
                 <span className="text-sm font-bold text-foreground">{job.id}</span>
             </div>
         </div>
-        
         {isJobInProgress && (
-          <button
-            onClick={() => setShowResetConfirm(true)}
-            className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-destructive transition-colors px-3 py-2 rounded border border-border/50 bg-background/50"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            RESET
+          <button onClick={() => setShowResetConfirm(true)} className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-destructive transition-colors px-3 py-2 rounded border border-border/50 bg-background/50">
+            <RotateCcw className="w-3.5 h-3.5" /> RESET
           </button>
         )}
       </header>
-
-      {/* Confirmation Modal */}
       {showResetConfirm && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
           <div className="bg-card border border-border rounded-lg p-6 panel-bevel max-w-sm w-full shadow-2xl">
             <h2 className="text-lg font-black text-foreground uppercase mb-2">Reset Protocols?</h2>
-            <p className="text-sm text-muted-foreground mb-6">
-              Current progress will be lost. Confirm reset.
-            </p>
+            <p className="text-sm text-muted-foreground mb-6">Current progress will be lost.</p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="flex-1 h-12 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide panel-bevel"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReset}
-                className="flex-1 h-12 bg-destructive text-destructive-foreground rounded-lg font-bold text-sm uppercase tracking-wide panel-bevel"
-              >
-                Reset
-              </button>
+              <button onClick={() => setShowResetConfirm(false)} className="flex-1 h-12 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide panel-bevel">Cancel</button>
+              <button onClick={handleReset} className="flex-1 h-12 bg-destructive text-destructive-foreground rounded-lg font-bold text-sm uppercase tracking-wide panel-bevel">Reset</button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Main Content */}
       <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
         {currentStep === "traveling" ? (
           <div className="flex-1 flex flex-col">
-            {/* Tactical Map */}
             <div className="flex-1 bg-card border border-border rounded-xl panel-inset overflow-hidden relative min-h-[300px]">
-              <div className="absolute inset-0 opacity-20"
-                style={{
-                  backgroundImage: `linear-gradient(to right, var(--color-action-success) 1px, transparent 1px), linear-gradient(to bottom, var(--color-action-success) 1px, transparent 1px)`,
-                  backgroundSize: "40px 40px",
-                }}
-              />
+              <div className="absolute inset-0 opacity-20" style={{ backgroundImage: `linear-gradient(to right, var(--color-action-success) 1px, transparent 1px), linear-gradient(to bottom, var(--color-action-success) 1px, transparent 1px)`, backgroundSize: "40px 40px" }} />
               <div className="relative z-10 h-full flex flex-col items-center justify-center p-6 text-center">
-                <div className="w-20 h-20 rounded-full border-4 border-action-success/30 flex items-center justify-center mb-6 animate-pulse">
-                  <Navigation className="w-10 h-10 text-action-success" />
-                </div>
+                <div className="w-20 h-20 rounded-full border-4 border-action-success/30 flex items-center justify-center mb-6 animate-pulse"><Navigation className="w-10 h-10 text-action-success" /></div>
                 <h2 className="text-2xl font-black text-foreground mb-1">{job.address}</h2>
-                <p className="text-lg text-muted-foreground font-medium">
-                  {job.distance} • ETA {job.estTime}
-                </p>
+                <p className="text-lg text-muted-foreground font-medium">{job.distance} • ETA {job.estTime}</p>
               </div>
             </div>
-
             <div className="mt-6">
-              <button
-                onClick={() => handleAction("arrived")}
-                className="w-full h-24 bg-action-info text-action-info-foreground rounded-xl font-black text-2xl uppercase tracking-wide flex items-center justify-center gap-4 panel-bevel active:scale-[0.98] transition-transform"
-              >
-                <MapPin className="w-8 h-8" />
-                ARRIVED ON SITE
-              </button>
+              <button onClick={() => handleAction("arrived")} className="w-full h-24 bg-action-info text-action-info-foreground rounded-xl font-black text-2xl uppercase tracking-wide flex items-center justify-center gap-4 panel-bevel active:scale-[0.98] transition-transform"><MapPin className="w-8 h-8" /> ARRIVED ON SITE</button>
             </div>
           </div>
         ) : (
           <>
-            {/* Job Details Card */}
             <div className="bg-card border border-border rounded-xl p-5 panel-inset space-y-4">
-               <div>
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Target Location</span>
-                  <h1 className="text-xl font-black text-foreground mt-1 leading-tight">{job.address}</h1>
-               </div>
-               
+               <div><span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Target Location</span><h1 className="text-xl font-black text-foreground mt-1 leading-tight">{job.address}</h1></div>
                <div className="pt-4 border-t border-border/50">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Critical Issue</span>
-                    {job.priority === 'high' && (
-                        <span className="text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20">High Priority</span>
-                    )}
+                    {job.priority === 'high' && <span className="text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-0.5 rounded border border-destructive/20">High Priority</span>}
                   </div>
                   <p className="text-lg font-bold text-destructive">{job.issue}</p>
                </div>
-
                <div className="bg-background/40 border border-border/50 rounded-lg p-3">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block mb-1">Dispatcher Notes</span>
                   <p className="text-sm text-foreground/80 leading-relaxed font-medium">{job.notes}</p>
                </div>
             </div>
-
-            {/* Action Grid */}
             <div className="flex flex-col gap-3 mt-auto pb-4">
-              <button
-                onClick={() => handleAction("traveling")}
-                disabled={currentStep !== "idle"}
-                className="w-full h-20 bg-action-warning text-action-warning-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"
-              >
-                <Navigation className="w-6 h-6" />
-                Start Travel
-              </button>
-
-              <button
-                onClick={() => handleAction("arrived")}
-                disabled={true}
-                className="w-full h-20 bg-action-info text-action-info-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"
-              >
-                <MapPin className="w-6 h-6" />
-                Arrived
-              </button>
-
-              <button
-                onClick={() => handleAction("debrief")}
-                disabled={currentStep !== "arrived"}
-                className="w-full h-20 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"
-              >
-                <CheckCircle2 className="w-6 h-6" />
-                Job Complete
-              </button>
+              <button onClick={() => handleAction("traveling")} disabled={currentStep !== "idle"} className="w-full h-20 bg-action-warning text-action-warning-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"><Navigation className="w-6 h-6" /> Start Travel</button>
+              <button onClick={() => handleAction("arrived")} disabled={true} className="w-full h-20 bg-action-info text-action-info-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"><MapPin className="w-6 h-6" /> Arrived</button>
+              <button onClick={() => handleAction("debrief")} disabled={currentStep !== "arrived"} className="w-full h-20 bg-action-success text-action-success-foreground rounded-xl font-black text-lg uppercase tracking-wide flex items-center justify-center gap-3 panel-bevel active:scale-[0.98] disabled:opacity-30 disabled:grayscale transition-all"><CheckCircle2 className="w-6 h-6" /> Job Complete</button>
             </div>
           </>
         )}
       </div>
-      
-      {/* Footer Status */}
       <footer className="w-full bg-card border-t border-border px-6 py-3 panel-bevel">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Operational Status</span>
@@ -326,41 +272,39 @@ function ActiveJobView({ job, onBack, onComplete }: { job: Job; onBack: () => vo
 
 // --- MAIN PAGE: MANIFEST VIEW ---
 export default function FieldApp() {
+  const [currentUser, setCurrentUser] = useState<string | null>(null) // <--- IDENTITY STATE
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   
-  // 1. THE BRAIN TRANSPLANT:
-  // Instead of static data, we listen to the database live.
-  const manifest = useLiveQuery(() => db.jobs.toArray())
+  // FILTERED QUERY: Only show jobs assigned to the current user
+  const manifest = useLiveQuery(
+    () => currentUser ? db.jobs.where('assignee').equals(currentUser).toArray() : [],
+    [currentUser]
+  )
 
-  // 2. INITIALIZE DB:
-  // Run the seed function when the app loads
-  useEffect(() => {
-    seedDatabase()
-  }, [])
+  useEffect(() => { seedDatabase() }, [])
 
-  // 3. HANDLE COMPLETION:
-  // Now we update the real database instead of React state
   const handleJobComplete = async (id: string) => {
-    if (!manifest) return;
-    
-    // Update the job in the database
-    await db.jobs.update(id, { 
-        status: "complete",
-        lastUpdated: Date.now()
-    })
-    
-    // Close the view
+    // Note: manifest might be undefined initially, but Dexie hooks handle this gracefully.
+    // If we're completing a job, we know it exists.
+    await db.jobs.update(id, { status: "complete", lastUpdated: Date.now() })
     setActiveJobId(null)
   }
 
-  // Loading state while database connects
-  if (!manifest) return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono scanlines">
-          <div className="text-action-success animate-pulse text-xl font-black tracking-widest uppercase">
-              Initializing IronClad DB...
-          </div>
-      </div>
-  )
+  // --- SHOW LOGIN SCREEN IF NO USER ---
+  if (!currentUser) {
+      return <LoginScreen onLogin={setCurrentUser} />
+  }
+
+  // Dexie returns undefined while loading
+  if (!manifest) {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono scanlines">
+            <div className="text-action-success animate-pulse text-xl font-black tracking-widest uppercase">
+                Initializing IronClad DB...
+            </div>
+        </div>
+      )
+  }
 
   const activeJob = manifest.find(j => j.id === activeJobId)
 
@@ -368,17 +312,12 @@ export default function FieldApp() {
   if (activeJob) {
     return (
       <div className="dark min-h-screen bg-background scanlines font-mono text-foreground">
-        <ActiveJobView 
-            // We cast the type because our DB type is slightly stricter
-            job={activeJob as any} 
-            onBack={() => setActiveJobId(null)} 
-            onComplete={handleJobComplete}
-        />
+        <ActiveJobView job={activeJob as any} onBack={() => setActiveJobId(null)} onComplete={handleJobComplete} />
       </div>
     )
   }
 
-  // Otherwise, show the Manifest (Job List)
+  // --- MANIFEST UI ---
   return (
     <div className="dark min-h-screen bg-background flex flex-col scanlines font-mono text-foreground select-none">
       
@@ -386,10 +325,7 @@ export default function FieldApp() {
       <div className="bg-background/90 backdrop-blur px-6 py-2 flex justify-between items-center text-[10px] font-bold text-muted-foreground border-b border-border/50 sticky top-0 z-50">
         <span>08:42 AM</span>
         <div className="flex gap-3">
-          {/* SECRET ADMIN PASSAGE: Click 'LTE' to go to Dashboard */}
-          <Link href="/dashboard" className="flex items-center gap-1 hover:text-action-success cursor-pointer transition-colors" title="Open Command Dashboard">
-             <Signal className="w-3 h-3" /> LTE
-          </Link>
+          <Link href="/dashboard" className="flex items-center gap-1 hover:text-action-success cursor-pointer transition-colors" title="Open Command Dashboard"><Signal className="w-3 h-3" /> LTE</Link>
           <div className="flex items-center gap-1"><Battery className="w-3 h-3" /> 84%</div>
         </div>
       </div>
@@ -402,12 +338,12 @@ export default function FieldApp() {
               <span className="w-2 h-2 rounded-full bg-action-success animate-pulse shadow-[0_0_10px_var(--color-action-success)]"/>
               <span className="text-xs font-black text-action-success tracking-widest uppercase">System Online</span>
             </div>
-            <h1 className="text-2xl font-black uppercase tracking-tight text-foreground">
-              Daily Manifest
-            </h1>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-foreground">Daily Manifest</h1>
           </div>
           <div className="text-right">
-            <span className="text-[10px] font-bold text-muted-foreground block uppercase tracking-wider">Date</span>
+             <button onClick={() => setCurrentUser(null)} className="text-[10px] font-bold text-primary hover:underline uppercase tracking-wider mb-1 block">
+                {currentUser} <Power className="w-3 h-3 inline ml-1"/>
+             </button>
             <span className="text-sm font-bold text-foreground">JAN 05</span>
           </div>
         </div>
@@ -420,6 +356,13 @@ export default function FieldApp() {
             Assigned Tasks ({manifest.filter(j => j.status === 'pending').length})
             </h2>
         </div>
+
+        {manifest.length === 0 && (
+            <div className="text-center p-8 border border-dashed border-border rounded-xl opacity-50">
+                <p className="text-sm font-bold uppercase">No assignments found</p>
+                <p className="text-[10px] text-muted-foreground mt-2">Waiting for dispatch...</p>
+            </div>
+        )}
 
         {manifest
             // Sort: Pending first, Complete last
@@ -442,43 +385,27 @@ export default function FieldApp() {
             <div className="p-5 pl-6">
               {/* ID & Priority Badge */}
               <div className="flex justify-between items-start mb-3">
-                <span className="text-[10px] font-black bg-background/80 px-2 py-1 rounded text-muted-foreground border border-border/50 font-mono">
-                    {job.id}
-                </span>
+                <span className="text-[10px] font-black bg-background/80 px-2 py-1 rounded text-muted-foreground border border-border/50 font-mono">{job.id}</span>
                 {job.status === 'complete' ? (
-                     <span className="flex items-center gap-1 text-[10px] font-black text-action-success uppercase bg-action-success/10 px-2 py-1 rounded border border-action-success/20">
-                        <CheckCircle2 className="w-3 h-3" /> Complete
-                    </span>
+                     <span className="flex items-center gap-1 text-[10px] font-black text-action-success uppercase bg-action-success/10 px-2 py-1 rounded border border-action-success/20"><CheckCircle2 className="w-3 h-3" /> Complete</span>
                 ) : job.priority === 'high' && (
-                    <span className="flex items-center gap-1 text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-1 rounded border border-destructive/20">
-                        <AlertCircle className="w-3 h-3" /> Priority
-                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-black text-destructive uppercase bg-destructive/10 px-2 py-1 rounded border border-destructive/20"><AlertCircle className="w-3 h-3" /> Priority</span>
                 )}
               </div>
 
               {/* Address & Issue */}
               <div className="flex justify-between items-center gap-4">
                 <div className="flex-1">
-                  <h3 className={`text-lg font-black leading-tight mb-1 ${job.status === 'complete' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
-                    {job.address}
-                  </h3>
-                  <p className="text-xs font-bold text-primary/90 uppercase tracking-wide truncate">
-                    {job.issue}
-                  </p>
+                  <h3 className={`text-lg font-black leading-tight mb-1 ${job.status === 'complete' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{job.address}</h3>
+                  <p className="text-xs font-bold text-primary/90 uppercase tracking-wide truncate">{job.issue}</p>
                 </div>
-                {job.status === 'pending' && (
-                    <ChevronRight className="w-6 h-6 text-muted-foreground/50 group-hover:text-primary transition-colors"/>
-                )}
+                {job.status === 'pending' && <ChevronRight className="w-6 h-6 text-muted-foreground/50 group-hover:text-primary transition-colors"/>}
               </div>
 
               {/* Footer Metadata */}
               <div className="mt-4 pt-3 border-t border-border/50 flex gap-4 text-xs font-bold text-muted-foreground">
-                 <span className="flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-action-info" /> {job.distance}
-                 </span>
-                 <span className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" /> {job.timeWindow}
-                 </span>
+                 <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-action-info" /> {job.distance}</span>
+                 <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" /> {job.timeWindow}</span>
               </div>
             </div>
           </button>
@@ -488,8 +415,7 @@ export default function FieldApp() {
       {/* Footer Action */}
       <footer className="p-4 pb-6 bg-card border-t border-border panel-bevel">
         <button className="w-full h-14 bg-secondary text-secondary-foreground rounded-lg font-bold text-sm uppercase tracking-wide flex items-center justify-center gap-2 panel-bevel active:scale-[0.98] hover:bg-secondary/90 transition-colors">
-            <Mic className="w-4 h-4" />
-            Dictate General Log
+            <Mic className="w-4 h-4" /> Dictate General Log
         </button>
       </footer>
 
